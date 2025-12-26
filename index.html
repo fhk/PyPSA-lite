@@ -3,7 +3,7 @@
   <head>
     <title>PyPSA in Browser</title>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.27.7/full/pyodide.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/highs@1.8.1/build/highs.min.js"></script>
+    <script src="https://lovasoa.github.io/highs-js/highs.js"></script>
   </head>
 
   <body>
@@ -35,7 +35,11 @@
       // Bridge function: solve LP/MIP problem using HiGHS
       async function solveWithHiGHS(problem) {
         if (!highsSolver) {
-          var highsSolver = await require("highs")();
+          const highs_loader = highs;
+          highsSolver = await highs_loader({
+            // In a browser, one can load the wasm file from github
+            locateFile: (file) => "https://lovasoa.github.io/highs-js/" + file
+          });
         }
 
         // Solve the problem
@@ -51,7 +55,11 @@
 
           // Initialize HiGHS solver
           output.value += "Loading HiGHS solver...\n";
-          var highsSolver = await require("highs")();
+          const highs_loader = highs;
+          highsSolver = await highs_loader({
+            // In a browser, one can load the wasm file from github
+            locateFile: (file) => "https://lovasoa.github.io/highs-js/" + file
+          });
           output.value += "HiGHS solver loaded!\n";
 
           // Make the solver available to Python
