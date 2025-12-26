@@ -13,6 +13,8 @@ jobs:
   build:
     name: Build Python wheel
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Required to create releases
     steps:
     - uses: actions/checkout@v6
       with:
@@ -44,3 +46,24 @@ jobs:
         name: pypsa-sdist
         path: dist/*.tar.gz
         retention-days: 90
+
+    - name: Create/Update Latest Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: latest-build
+        name: Latest Build
+        body: |
+          Automated build from master branch.
+
+          **Commit:** ${{ github.sha }}
+          **Date:** ${{ github.event.head_commit.timestamp }}
+
+          Download the wheel file below to install:
+          ```bash
+          pip install <wheel-file-url>
+          ```
+        files: |
+          dist/*.whl
+          dist/*.tar.gz
+        prerelease: true
+        make_latest: false
