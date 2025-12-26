@@ -66,6 +66,9 @@
           output.value += "Installing PyPSA from GitHub Pages...\n";
           // This URL will be automatically updated by the workflow
           await micropip.install(
+            "https://fhk.github.io/linopy/wheels/linopy-0.0.post1.dev1230+g05cf7382c-py3-none-any.whl"
+          );
+          await micropip.install(
             "https://fhk.github.io/PyPSA-lite/wheels/pypsa-1.0.7.dev1+g0e491881-py3-none-any.whl"
           );
 
