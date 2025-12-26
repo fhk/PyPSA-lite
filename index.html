@@ -1,4 +1,4 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
   <head>
     <title>PyPSA in Browser</title>
@@ -12,12 +12,12 @@
       You can execute any Python code. Just enter something in the box below and
       click the button.
     </p>
-    <input id="code" value="sum([1, 2, 3, 4, 5])" style="width: 100%;" />
+    <input id="code" value="sum([1, 2, 3, 4, 5])" style="width: 100%" />
     <button onclick="evaluatePython()">Run</button>
     <br />
     <br />
     <div>Output:</div>
-    <textarea id="output" style="width: 100%;" rows="20" disabled></textarea>
+    <textarea id="output" style="width: 100%" rows="20" disabled></textarea>
 
     <script>
       const output = document.getElementById("output");
@@ -35,7 +35,7 @@
       // Bridge function: solve LP/MIP problem using HiGHS
       async function solveWithHiGHS(problem) {
         if (!highsSolver) {
-          highsSolver = await highs();
+          var highsSolver = await require("highs")();
         }
 
         // Solve the problem
@@ -51,7 +51,7 @@
 
           // Initialize HiGHS solver
           output.value += "Loading HiGHS solver...\n";
-          highsSolver = await highs();
+          var highsSolver = await require("highs")();
           output.value += "HiGHS solver loaded!\n";
 
           // Make the solver available to Python
