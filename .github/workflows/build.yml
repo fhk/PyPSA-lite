@@ -14,7 +14,7 @@ jobs:
     name: Build Python wheel
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # Required to create releases
+      contents: write  # Required to create releases and push to gh-pages
     steps:
     - uses: actions/checkout@v6
       with:
@@ -32,6 +32,11 @@ jobs:
 
     - name: Build wheel and source distribution
       run: python -m build
+
+    - name: Get wheel filename
+      id: wheel
+      run: |
+        echo "filename=$(ls dist/*.whl | xargs -n 1 basename)" >> $GITHUB_OUTPUT
 
     - name: Upload wheel artifact
       uses: actions/upload-artifact@v4
@@ -58,12 +63,50 @@ jobs:
           **Commit:** ${{ github.sha }}
           **Date:** ${{ github.event.head_commit.timestamp }}
 
+          **Wheel file:** ${{ steps.wheel.outputs.filename }}
+
           Download the wheel file below to install:
           ```bash
-          pip install <wheel-file-url>
+          pip install https://fhk.github.io/PyPSA-lite/wheels/${{ steps.wheel.outputs.filename }}
           ```
         files: |
           dist/*.whl
           dist/*.tar.gz
         prerelease: true
         make_latest: false
+
+    - name: Prepare GitHub Pages deployment
+      run: |
+        mkdir -p gh-pages/wheels
+        cp dist/*.whl gh-pages/wheels/
+        cp index.html gh-pages/index.html
+
+        # Update index.html with correct wheel filename
+        sed -i 's|pypsa-1.0.7.dev1+g0e491881-py3-none-any.whl|${{ steps.wheel.outputs.filename }}|g' gh-pages/index.html
+
+        # Create a simple index page for the wheels directory
+        cat > gh-pages/wheels/index.html << 'EOF'
+        <!DOCTYPE html>
+        <html>
+        <head><title>PyPSA Wheels</title></head>
+        <body>
+        <h1>PyPSA Wheel Files</h1>
+        <p>Available wheels:</p>
+        <ul>
+        EOF
+        for file in gh-pages/wheels/*.whl; do
+          filename=$(basename "$file")
+          echo "<li><a href=\"$filename\">$filename</a></li>" >> gh-pages/wheels/index.html
+        done
+        cat >> gh-pages/wheels/index.html << 'EOF'
+        </ul>
+        </body>
+        </html>
+        EOF
+
+    - name: Deploy to GitHub Pages
+      uses: peaceiris/actions-gh-pages@v4
+      with:
+        github_token: ${{ secrets.GITHUB_TOKEN }}
+        publish_dir: ./gh-pages
+        force_orphan: true

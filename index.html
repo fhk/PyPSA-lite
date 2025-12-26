@@ -1,0 +1,91 @@
+<!doctype html>
+<html>
+  <head>
+    <title>PyPSA in Browser</title>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.29.0/full/pyodide.js"></script>
+  </head>
+
+  <body>
+    <h1>PyPSA Demo</h1>
+    <p>
+      You can execute any Python code. Just enter something in the box below and
+      click the button.
+    </p>
+    <input id="code" value="sum([1, 2, 3, 4, 5])" style="width: 100%;" />
+    <button onclick="evaluatePython()">Run</button>
+    <br />
+    <br />
+    <div>Output:</div>
+    <textarea id="output" style="width: 100%;" rows="20" disabled></textarea>
+
+    <script>
+      const output = document.getElementById("output");
+      const code = document.getElementById("code");
+
+      function addToOutput(s) {
+        output.value += ">>> " + code.value + "\n" + s + "\n";
+      }
+
+      output.value = "Initializing Pyodide...\n";
+
+      // Initialize Pyodide and load PyPSA
+      async function main() {
+        try {
+          let pyodide = await loadPyodide();
+          output.value += "Pyodide loaded!\n";
+
+          output.value += "Loading micropip...\n";
+          await pyodide.loadPackage("micropip");
+          const micropip = pyodide.pyimport("micropip");
+
+          output.value += "Installing PyPSA from GitHub Pages...\n";
+          // This URL will be automatically updated by the workflow
+          await micropip.install(
+            "https://fhk.github.io/PyPSA-lite/wheels/pypsa-1.0.7.dev1+g0e491881-py3-none-any.whl"
+          );
+
+          output.value += "PyPSA installed successfully!\n";
+          output.value += "Running demo...\n\n";
+
+          // Run the demo
+          await pyodide.runPythonAsync(`
+import pypsa
+
+# Create a new network
+n = pypsa.Network()
+
+# Add components
+n.add("Bus", "mybus")
+n.add("Load", "myload", bus="mybus", p_set=100)
+n.add("Generator", "mygen", bus="mybus", p_nom=100, marginal_cost=20)
+
+# Optimize the network
+n.optimize()
+
+# Get statistics
+print("Network Statistics:")
+print(n.statistics())
+          `);
+
+          output.value += "\nReady! You can now run Python code.\n";
+          return pyodide;
+        } catch (err) {
+          output.value += "Error: " + err + "\n";
+          console.error(err);
+        }
+      }
+
+      let pyodideReadyPromise = main();
+
+      async function evaluatePython() {
+        let pyodide = await pyodideReadyPromise;
+        try {
+          let result = await pyodide.runPythonAsync(code.value);
+          addToOutput(result);
+        } catch (err) {
+          addToOutput(err);
+        }
+      }
+    </script>
+  </body>
+</html>
