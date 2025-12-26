@@ -18,7 +18,6 @@ from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import pandas as pd
-from Levenshtein import distance
 
 from pypsa._options import options
 from pypsa.components.common import as_components
@@ -56,7 +55,7 @@ def _get_potential_typos(
             True if custom_attr could be a typo of default_attr, False otherwise
 
         """
-        dist = distance(custom_attr, default_attr)
+        dist = 1
         # Basic condition
         if (
             dist != 1
