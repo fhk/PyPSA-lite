@@ -473,7 +473,13 @@ class OptimizationAccessor(OptimizationAbstractMixin):
         )
         if extra_functionality:
             extra_functionality(n, sns)
-        status, condition = m.solve(solver_name=solver_name, **solver_options, **kwargs)
+
+        # Check if using HiGHS-JS solver (for Pyodide/browser environment)
+        if solver_name == "highs-js":
+            from pypsa.optimization.highs_js_solver import solve_with_highs_js
+            status, condition = solve_with_highs_js(m, **solver_options, **kwargs)
+        else:
+            status, condition = m.solve(solver_name=solver_name, **solver_options, **kwargs)
 
         if status == "ok":
             n.optimize.assign_solution()

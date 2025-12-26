@@ -3,6 +3,7 @@
   <head>
     <title>PyPSA in Browser</title>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.27.7/full/pyodide.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/highs@1.8.1/build/highs.min.js"></script>
   </head>
 
   <body>
@@ -28,11 +29,33 @@
 
       output.value = "Initializing Pyodide...\n";
 
+      // Initialize HiGHS solver
+      let highsSolver = null;
+
+      // Bridge function: solve LP/MIP problem using HiGHS
+      async function solveWithHiGHS(problem) {
+        if (!highsSolver) {
+          highsSolver = await highs();
+        }
+
+        // Solve the problem
+        const result = highsSolver.solve(problem);
+        return result;
+      }
+
       // Initialize Pyodide and load PyPSA
       async function main() {
         try {
           let pyodide = await loadPyodide();
           output.value += "Pyodide loaded!\n";
+
+          // Initialize HiGHS solver
+          output.value += "Loading HiGHS solver...\n";
+          highsSolver = await highs();
+          output.value += "HiGHS solver loaded!\n";
+
+          // Make the solver available to Python
+          pyodide.globals.set("js_highs_solve", solveWithHiGHS);
 
           output.value += "Loading micropip...\n";
           await pyodide.loadPackage("micropip");
@@ -45,6 +68,8 @@
           );
 
           output.value += "PyPSA installed successfully!\n";
+          output.value += "HiGHS-JS solver bridge is ready!\n";
+
           output.value += "Running demo...\n\n";
 
           // Run the demo
@@ -59,11 +84,20 @@ n.add("Bus", "mybus")
 n.add("Load", "myload", bus="mybus", p_set=100)
 n.add("Generator", "mygen", bus="mybus", p_nom=100, marginal_cost=20)
 
-# Optimize the network
-n.optimize()
+# Optimize the network using HiGHS-JS solver
+print("Optimizing network with HiGHS WebAssembly solver...")
+try:
+    status, condition = n.optimize(solver_name="highs-js")
+    print(f"Optimization complete! Status: {status}, Condition: {condition}")
+    if status == "ok":
+        print("Optimization successful!")
+except Exception as e:
+    print(f"Optimization error: {e}")
+    import traceback
+    traceback.print_exc()
 
 # Get statistics
-print("Network Statistics:")
+print("\\nNetwork Statistics:")
 print(n.statistics())
           `);
 
