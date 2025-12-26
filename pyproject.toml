@@ -34,7 +34,7 @@ dependencies = [
     "pandas>=0.24",
     "xarray",
     "netcdf4",
-    "linopy>=0.5.5",
+    "linopy==0.0.post1.dev1232+gb9f23b7c6",
     "matplotlib",
     "plotly",
     "pydeck",
