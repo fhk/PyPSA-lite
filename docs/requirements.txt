@@ -37,7 +37,7 @@ blosc2==3.10.0
     # via tables
 boolean-py==5.0
     # via license-expression
-bottleneck==1.6.0
+#bottleneck==1.6.0
     # via linopy
 cachetools==6.2.0
     # via google-auth
