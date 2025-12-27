@@ -46,22 +46,21 @@
           // Wait for HiGHS script to load if not ready yet
           let attempts = 0;
           const maxAttempts = 50; // 5 seconds max
-          while (typeof window.highs === 'undefined' && typeof highs === 'undefined') {
-            console.log("[HiGHS-JS Bridge] Waiting for HiGHS script... attempt", attempts + 1);
+          while (typeof Module === 'undefined') {
+            console.log("[HiGHS-JS Bridge] Waiting for HiGHS script (Module)... attempt", attempts + 1);
             if (attempts >= maxAttempts) {
-              throw new Error("HiGHS script failed to load after 5 seconds");
+              throw new Error("HiGHS Module failed to load after 5 seconds");
             }
             await new Promise(resolve => setTimeout(resolve, 100));
             attempts++;
           }
 
           try {
-            const highs_loader = window.highs || highs;  // Global function from highs.js script
-            console.log("[HiGHS-JS Bridge] highs_loader type:", typeof highs_loader);
-            console.log("[HiGHS-JS Bridge] highs_loader:", highs_loader);
+            console.log("[HiGHS-JS Bridge] Module type:", typeof Module);
+            console.log("[HiGHS-JS Bridge] Module:", Module);
 
-            highsSolver = await highs_loader({
-              // In a browser, one can load the wasm file from github
+            // Call Module() with locateFile configuration
+            highsSolver = await Module({
               locateFile: (file) => {
                 const url = "https://lovasoa.github.io/highs-js/" + file;
                 console.log("[HiGHS-JS Bridge] Loading WASM file:", url);
