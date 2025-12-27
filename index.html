@@ -44,14 +44,21 @@
           console.log("[HiGHS-JS Bridge] Initializing HiGHS solver...");
 
           // Wait for HiGHS script to load if not ready yet
-          while (typeof highs === 'undefined') {
-            console.log("[HiGHS-JS Bridge] Waiting for HiGHS script...");
+          let attempts = 0;
+          const maxAttempts = 50; // 5 seconds max
+          while (typeof window.highs === 'undefined' && typeof highs === 'undefined') {
+            console.log("[HiGHS-JS Bridge] Waiting for HiGHS script... attempt", attempts + 1);
+            if (attempts >= maxAttempts) {
+              throw new Error("HiGHS script failed to load after 5 seconds");
+            }
             await new Promise(resolve => setTimeout(resolve, 100));
+            attempts++;
           }
 
           try {
-            const highs_loader = highs;  // Global function from highs.js script
+            const highs_loader = window.highs || highs;  // Global function from highs.js script
             console.log("[HiGHS-JS Bridge] highs_loader type:", typeof highs_loader);
+            console.log("[HiGHS-JS Bridge] highs_loader:", highs_loader);
 
             highsSolver = await highs_loader({
               // In a browser, one can load the wasm file from github
@@ -113,7 +120,29 @@
           output.value += "PyPSA installed successfully!\n";
           output.value += "HiGHS-JS solver bridge is ready!\n";
 
-          output.value += "Running demo...\n\n";
+          // Test HiGHS solver with a simple problem first
+          output.value += "Testing HiGHS solver...\n";
+          try {
+            const testProblem = `Maximize
+ obj: x + 2 y
+Subject To
+ c1: x + y <= 20
+ c2: x - y >= -30
+Bounds
+ 0 <= x
+ 0 <= y
+End`;
+            console.log("[HiGHS Test] Running test problem...");
+            const testResult = await globalThis.js_highs_solve(testProblem);
+            console.log("[HiGHS Test] Test result:", testResult);
+            output.value += "HiGHS solver test passed!\n";
+          } catch (err) {
+            output.value += "HiGHS solver test failed: " + err + "\n";
+            console.error("[HiGHS Test] Failed:", err);
+            throw err;
+          }
+
+          output.value += "\nRunning PyPSA demo...\n\n";
 
           // Run the demo
           await pyodide.runPythonAsync(`
