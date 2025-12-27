@@ -109,7 +109,12 @@ def _linear_expression_to_sparse(expr):
             if var_idx >= 0 and not np.isnan(coeff):
                 row_indices.append(i)
                 col_indices.append(int(var_idx))
-                data.append(coeff)
+                data.append(float(coeff))
+
+    # Convert to proper 1-D numpy arrays
+    data = np.array(data, dtype=float)
+    row_indices = np.array(row_indices, dtype=int)
+    col_indices = np.array(col_indices, dtype=int)
 
     return sp.csr_matrix((data, (row_indices, col_indices)), shape=(n_rows, n_cols))
 
