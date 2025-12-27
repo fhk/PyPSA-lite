@@ -110,7 +110,8 @@ def _parse_highs_result(result, model: Model):
         "Unbounded": ("warning", "unbounded"),
     }
 
-    result_status = result.get("Status", "Unknown")
+    # Access JsProxy object properties using bracket notation or attribute access
+    result_status = result["Status"] if "Status" in result else "Unknown"
     status, condition = status_map.get(result_status, ("error", "unknown"))
 
     if status != "ok":
@@ -118,12 +119,14 @@ def _parse_highs_result(result, model: Model):
         return status, condition
 
     # Extract solution values from Columns dict
-    # Columns is a dict like: {"x0": {"Primal": 100, ...}, "x1": {...}, ...}
-    columns = result.get("Columns", {})
+    # Columns is a JsProxy object like: {"x0": {"Primal": 100, ...}, "x1": {...}, ...}
+    columns = result["Columns"] if "Columns" in result else {}
 
     # Sort by variable name (x0, x1, x2, ...) to ensure correct order
     sorted_vars = sorted(columns.keys(), key=lambda x: int(x[1:]) if x.startswith('x') else x)
-    solution_values = np.array([columns[var_name].get("Primal", 0.0) for var_name in sorted_vars])
+    # Access Primal values from JsProxy column objects
+    solution_values = np.array([columns[var_name]["Primal"] if "Primal" in columns[var_name] else 0.0
+                                for var_name in sorted_vars])
 
     # Assign solution to model variables
     idx = 0
