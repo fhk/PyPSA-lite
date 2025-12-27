@@ -87,6 +87,55 @@ def solve_with_highs_js(model: Model, **kwargs) -> tuple[str, str]:
             raise Exception("HiGHS solver returned no result")
 
         logger.info(f"HiGHS-JS result received, type: {type(result)}")
+
+        # Debug: Print the whole result object
+        print("=" * 60)
+        print("RESULT OBJECT DEBUG:")
+        print(f"Type: {type(result)}")
+        print(f"Repr: {repr(result)}")
+        print(f"Str: {str(result)}")
+
+        # Try to convert to Python dict
+        try:
+            if hasattr(result, 'to_py'):
+                py_result = result.to_py()
+                print(f"Converted to Python: {py_result}")
+            else:
+                print("No to_py() method available")
+        except Exception as e:
+            print(f"to_py() conversion failed: {e}")
+
+        # Show available attributes
+        print(f"\nDir (first 20): {dir(result)[:20]}")
+
+        # Try different access methods
+        print("\nTrying attribute access:")
+        try:
+            print(f"  result.Status: {result.Status}")
+        except Exception as e:
+            print(f"  Attribute access failed: {e}")
+
+        print("\nTrying bracket access:")
+        try:
+            print(f"  result['Status']: {result['Status']}")
+        except Exception as e:
+            print(f"  Bracket access failed: {e}")
+
+        # Try using JavaScript's Object.keys()
+        try:
+            from js import Object
+            keys = Object.keys(result)
+            print(f"\nJavaScript Object.keys(): {list(keys)}")
+            for key in keys:
+                try:
+                    print(f"  {key}: {result[key]}")
+                except Exception as e:
+                    print(f"  {key}: <error: {e}>")
+        except Exception as e:
+            print(f"\nObject.keys() failed: {e}")
+
+        print("=" * 60)
+
     except Exception as e:
         msg = f"HiGHS-JS solver failed: {e}"
         logger.error(msg)
