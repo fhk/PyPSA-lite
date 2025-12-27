@@ -86,55 +86,15 @@ def solve_with_highs_js(model: Model, **kwargs) -> tuple[str, str]:
         if result is None:
             raise Exception("HiGHS solver returned no result")
 
-        logger.info(f"HiGHS-JS result received, type: {type(result)}")
+        logger.info(f"HiGHS-JS result received")
 
-        # Debug: Print the whole result object
-        print("=" * 60)
-        print("RESULT OBJECT DEBUG:")
-        print(f"Type: {type(result)}")
-        print(f"Repr: {repr(result)}")
-        print(f"Str: {str(result)}")
-
-        # Try to convert to Python dict
-        try:
-            if hasattr(result, 'to_py'):
-                py_result = result.to_py()
-                print(f"Converted to Python: {py_result}")
-            else:
-                print("No to_py() method available")
-        except Exception as e:
-            print(f"to_py() conversion failed: {e}")
-
-        # Show available attributes
-        print(f"\nDir (first 20): {dir(result)[:20]}")
-
-        # Try different access methods
-        print("\nTrying attribute access:")
-        try:
-            print(f"  result.Status: {result.Status}")
-        except Exception as e:
-            print(f"  Attribute access failed: {e}")
-
-        print("\nTrying bracket access:")
-        try:
-            print(f"  result['Status']: {result['Status']}")
-        except Exception as e:
-            print(f"  Bracket access failed: {e}")
-
-        # Try using JavaScript's Object.keys()
-        try:
-            from js import Object
-            keys = Object.keys(result)
-            print(f"\nJavaScript Object.keys(): {list(keys)}")
-            for key in keys:
-                try:
-                    print(f"  {key}: {result[key]}")
-                except Exception as e:
-                    print(f"  {key}: <error: {e}>")
-        except Exception as e:
-            print(f"\nObject.keys() failed: {e}")
-
-        print("=" * 60)
+        # Convert JsProxy to Python dict using to_py()
+        if hasattr(result, 'to_py'):
+            result = result.to_py()
+            logger.info(f"Converted result to Python dict")
+        else:
+            logger.error("Result doesn't have to_py() method")
+            return "error", "unknown"
 
     except Exception as e:
         msg = f"HiGHS-JS solver failed: {e}"
@@ -148,23 +108,26 @@ def solve_with_highs_js(model: Model, **kwargs) -> tuple[str, str]:
 
 
 def _parse_highs_result(result, model: Model):
-    """Parse HiGHS result and update model solution."""
+    """Parse HiGHS result and update model solution.
+
+    Parameters
+    ----------
+    result : dict
+        Python dict converted from HiGHS-JS result using to_py()
+    model : linopy.Model
+        The optimization model to update with solution
+    """
     import numpy as np
     import xarray as xr
 
-    # Check status
+    # Check status (result is now a Python dict)
     status_map = {
         "Optimal": ("ok", "optimal"),
         "Infeasible": ("warning", "infeasible"),
         "Unbounded": ("warning", "unbounded"),
     }
 
-    # Access JsProxy object properties using bracket notation with try/except
-    try:
-        result_status = result["Status"]
-    except (KeyError, TypeError):
-        result_status = "Unknown"
-
+    result_status = result.get("Status", "Unknown")
     status, condition = status_map.get(result_status, ("error", "unknown"))
 
     if status != "ok":
@@ -172,23 +135,13 @@ def _parse_highs_result(result, model: Model):
         return status, condition
 
     # Extract solution values from Columns dict
-    # Columns is a JsProxy object like: {"x0": {"Primal": 100, ...}, "x1": {...}, ...}
-    try:
-        columns = result["Columns"]
-    except (KeyError, TypeError):
-        columns = {}
+    columns = result.get("Columns", {})
 
     # Sort by variable name (x0, x1, x2, ...) to ensure correct order
     sorted_vars = sorted(columns.keys(), key=lambda x: int(x[1:]) if x.startswith('x') else x)
 
-    # Access Primal values from JsProxy column objects
-    def get_primal(col):
-        try:
-            return col["Primal"]
-        except (KeyError, TypeError):
-            return 0.0
-
-    solution_values = np.array([get_primal(columns[var_name]) for var_name in sorted_vars])
+    # Extract Primal values
+    solution_values = np.array([columns[var_name].get("Primal", 0.0) for var_name in sorted_vars])
 
     # Assign solution to model variables
     idx = 0
@@ -203,9 +156,10 @@ def _parse_highs_result(result, model: Model):
         idx += size
 
     # Set objective value if available
-    try:
-        model.objective.value = result["ObjectiveValue"]
-    except (KeyError, TypeError):
+    objective_value = result.get("ObjectiveValue")
+    if objective_value is not None:
+        model.objective.value = objective_value
+    else:
         logger.warning("ObjectiveValue not found in HiGHS result")
 
     logger.info(f"HiGHS-JS solver completed successfully. Objective: {model.objective.value}")
