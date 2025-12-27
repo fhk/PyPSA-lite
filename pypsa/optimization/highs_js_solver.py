@@ -64,14 +64,13 @@ def solve_with_highs_js(model: Model, **kwargs) -> tuple[str, str]:
     # Call JavaScript HiGHS solver (async function)
     try:
         # The JS function is async, so we get a PyodideFuture
-        # We need to await it to get the actual result
-        import asyncio
+        # In Pyodide, we use .then() to convert the Promise to a Python value
         result_future = js.js_highs_solve(lp_string)
 
-        # Convert PyodideFuture to actual result
-        # In Pyodide, we can use asyncio.ensure_future and run it
-        loop = asyncio.get_event_loop()
-        result = loop.run_until_complete(result_future)
+        # PyodideFuture can be converted using .then() which returns immediately
+        # We need to use Pyodide's promise handling
+        import pyodide_js
+        result = pyodide_js.await_promise(result_future)
     except Exception as e:
         msg = f"HiGHS-JS solver failed: {e}"
         logger.error(msg)
@@ -102,8 +101,13 @@ def _parse_highs_result(result, model: Model):
         logger.warning(f"HiGHS-JS solver finished with status: {result_status}")
         return status, condition
 
-    # Extract solution values
-    solution_values = np.array([col.get("Primal", 0.0) for col in result.get("Columns", [])])
+    # Extract solution values from Columns dict
+    # Columns is a dict like: {"x0": {"Primal": 100, ...}, "x1": {...}, ...}
+    columns = result.get("Columns", {})
+
+    # Sort by variable name (x0, x1, x2, ...) to ensure correct order
+    sorted_vars = sorted(columns.keys(), key=lambda x: int(x[1:]) if x.startswith('x') else x)
+    solution_values = np.array([columns[var_name].get("Primal", 0.0) for var_name in sorted_vars])
 
     # Assign solution to model variables
     idx = 0
