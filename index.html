@@ -85,8 +85,10 @@
           // Initialize HiGHS solver
           output.value += "Loading HiGHS solver...\n";
 
-          // Make the solver available to Python
-          pyodide.globals.set("js_highs_solve", solveWithHiGHS);
+          // Make the solver available to Python via the js module
+          // Set on JavaScript global object so it's accessible via js.js_highs_solve in Python
+          globalThis.js_highs_solve = solveWithHiGHS;
+          console.log("[HiGHS-JS Bridge] Exposed js_highs_solve to Python");
 
           output.value += "Loading micropip...\n";
           await pyodide.loadPackage("micropip");
