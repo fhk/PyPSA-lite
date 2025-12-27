@@ -165,4 +165,8 @@ def _parse_highs_result(result, model: Model):
 
     logger.info(f"HiGHS-JS solver completed successfully. Objective: {model.objective.value}")
 
+    # Mark model as optimized by setting status
+    model.status = status
+    model.termination_condition = condition
+
     return status, condition
