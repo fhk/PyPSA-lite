@@ -42,6 +42,13 @@
         // Initialize solver on first use
         if (!highsSolver) {
           console.log("[HiGHS-JS Bridge] Initializing HiGHS solver...");
+
+          // Wait for HiGHS script to load if not ready yet
+          while (typeof highs === 'undefined') {
+            console.log("[HiGHS-JS Bridge] Waiting for HiGHS script...");
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+
           try {
             const highs_loader = highs;  // Global function from highs.js script
             console.log("[HiGHS-JS Bridge] highs_loader type:", typeof highs_loader);

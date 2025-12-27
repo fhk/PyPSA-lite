@@ -61,9 +61,17 @@ def solve_with_highs_js(model: Model, **kwargs) -> tuple[str, str]:
 
     logger.info(f"Calling HiGHS-JS solver...")
 
-    # Call JavaScript HiGHS solver
+    # Call JavaScript HiGHS solver (async function)
     try:
-        result = js.js_highs_solve(lp_string)
+        # The JS function is async, so we get a PyodideFuture
+        # We need to await it to get the actual result
+        import asyncio
+        result_future = js.js_highs_solve(lp_string)
+
+        # Convert PyodideFuture to actual result
+        # In Pyodide, we can use asyncio.ensure_future and run it
+        loop = asyncio.get_event_loop()
+        result = loop.run_until_complete(result_future)
     except Exception as e:
         msg = f"HiGHS-JS solver failed: {e}"
         logger.error(msg)
