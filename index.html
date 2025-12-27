@@ -27,10 +27,13 @@
         output.value += ">>> " + code.value + "\n" + s + "\n";
       }
 
-      output.value = "Initializing Pyodide...\n";
+      output.value = "Initializing...\n";
 
-      // Initialize HiGHS solver (will be set during initialization)
-      let highsSolver = null;
+      // Initialize HiGHS solver promise (starts loading immediately)
+      const highs_settings = {
+        locateFile: (file) => "https://lovasoa.github.io/highs-js/" + file
+      };
+      const highs_promise = highs(highs_settings);
 
       // Synchronous bridge function: solve LP/MIP problem using HiGHS
       function solveWithHiGHS(problem) {
@@ -39,107 +42,44 @@
         console.log("[HiGHS-JS Bridge] Problem length:", problem?.length || "N/A");
         console.log("[HiGHS-JS Bridge] Problem preview:", problem?.substring(0, 200) || problem);
 
-        if (!highsSolver) {
-          throw new Error("HiGHS solver not initialized. This should not happen!");
-        }
-
-        // Solve the problem
-        console.log("[HiGHS-JS Bridge] Calling solver.solve()...");
-        try {
-          const result = highsSolver.solve(problem);
-          console.log("[HiGHS-JS Bridge] Solver completed");
-          console.log("[HiGHS-JS Bridge] Result type:", typeof result);
-          console.log("[HiGHS-JS Bridge] Result keys:", Object.keys(result));
-          console.log("[HiGHS-JS Bridge] Result:", result);
-          return result;
-        } catch (error) {
-          console.error("[HiGHS-JS Bridge] Solve failed:", error);
-          throw new Error("Solve failed: " + error.message);
-        }
+        // This must be called after highs_promise is resolved
+        // We'll handle this by ensuring initialization completes before exposing to Python
+        throw new Error("This should not be called directly - use async version");
       }
 
-      // Wait for HiGHS script to load
-      function waitForHiGHS() {
-        return new Promise((resolve, reject) => {
-          console.log("[HiGHS-JS Bridge] Waiting for HiGHS script to load...");
+      // Async bridge function for Python
+      async function solveWithHiGHSAsync(problem) {
+        console.log("[HiGHS-JS Bridge] solveWithHiGHSAsync called");
+        console.log("[HiGHS-JS Bridge] Problem:", problem?.substring(0, 200));
 
-          // If already loaded, resolve immediately
-          if (typeof highs !== 'undefined') {
-            console.log("[HiGHS-JS Bridge] HiGHS already loaded");
-            resolve();
-            return;
-          }
+        const solver = await highs_promise;
+        console.log("[HiGHS-JS Bridge] Solver ready, calling solve()...");
 
-          // Otherwise, listen for the script load event
-          const script = document.getElementById('highs-script');
-          if (script) {
-            script.addEventListener('load', () => {
-              console.log("[HiGHS-JS Bridge] HiGHS script loaded via event");
-              resolve();
-            });
-            script.addEventListener('error', () => {
-              console.error("[HiGHS-JS Bridge] HiGHS script failed to load");
-              reject(new Error("Failed to load HiGHS script"));
-            });
-          } else {
-            // Fallback: poll with timeout
-            let attempts = 0;
-            const maxAttempts = 50; // 5 seconds
-            const interval = setInterval(() => {
-              attempts++;
-              if (typeof highs !== 'undefined') {
-                console.log("[HiGHS-JS Bridge] HiGHS loaded after polling");
-                clearInterval(interval);
-                resolve();
-              } else if (attempts >= maxAttempts) {
-                clearInterval(interval);
-                reject(new Error("Timeout waiting for HiGHS script"));
-              }
-            }, 100);
-          }
-        });
-      }
-
-      // Initialize HiGHS solver asynchronously
-      async function initializeHiGHSSolver() {
-        // Wait for the HiGHS script to load first
-        await waitForHiGHS();
-
-        console.log("[HiGHS-JS Bridge] Initializing HiGHS solver...");
-        try {
-          const highs_loader = highs;  // Global function from highs.js script
-          console.log("[HiGHS-JS Bridge] highs_loader type:", typeof highs_loader);
-
-          highsSolver = await highs_loader({
-            // In a browser, one can load the wasm file from github
-            locateFile: (file) => {
-              const url = "https://lovasoa.github.io/highs-js/" + file;
-              console.log("[HiGHS-JS Bridge] Loading WASM file:", url);
-              return url;
-            },
-          });
-          console.log("[HiGHS-JS Bridge] Solver initialized successfully");
-          console.log("[HiGHS-JS Bridge] Solver methods:", Object.keys(highsSolver));
-        } catch (error) {
-          console.error("[HiGHS-JS Bridge] Solver initialization failed:", error);
-          throw new Error("Failed to initialize HiGHS solver: " + error.message);
-        }
+        const result = solver.solve(problem);
+        console.log("[HiGHS-JS Bridge] Result:", result);
+        return result;
       }
 
       // Initialize Pyodide and load PyPSA
       async function main() {
         try {
+          output.value += "Initializing Pyodide...\n";
           let pyodide = await loadPyodide();
           output.value += "Pyodide loaded!\n";
 
-          // Initialize HiGHS solver
+          // Wait for HiGHS solver to be ready
           output.value += "Loading HiGHS solver...\n";
-          await initializeHiGHSSolver();
+          const solver = await highs_promise;
           output.value += "HiGHS solver loaded!\n";
 
-          // Make the solver available to Python via the js module
-          // Set on JavaScript global object so it's accessible via js.js_highs_solve in Python
-          globalThis.js_highs_solve = solveWithHiGHS;
+          // Create a synchronous wrapper now that solver is ready
+          globalThis.js_highs_solve = function(problem) {
+            console.log("[HiGHS-JS Bridge] js_highs_solve called");
+            console.log("[HiGHS-JS Bridge] Problem:", problem?.substring(0, 200));
+            const result = solver.solve(problem);
+            console.log("[HiGHS-JS Bridge] Result:", result);
+            return result;
+          };
           console.log("[HiGHS-JS Bridge] Exposed js_highs_solve to Python");
 
           output.value += "Loading micropip...\n";
