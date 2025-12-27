@@ -3,7 +3,7 @@
   <head>
     <title>PyPSA in Browser</title>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.27.7/full/pyodide.js"></script>
-    <script src="https://lovasoa.github.io/highs-js/highs.js"></script>
+    <script src="https://lovasoa.github.io/highs-js/highs.js" id="highs-script"></script>
   </head>
 
   <body>
@@ -59,13 +59,45 @@
       }
 
       // Wait for HiGHS script to load
-      async function waitForHiGHS() {
-        console.log("[HiGHS-JS Bridge] Waiting for HiGHS script to load...");
-        // Poll for the highs global to be available
-        while (typeof highs === 'undefined') {
-          await new Promise(resolve => setTimeout(resolve, 100));
-        }
-        console.log("[HiGHS-JS Bridge] HiGHS script loaded");
+      function waitForHiGHS() {
+        return new Promise((resolve, reject) => {
+          console.log("[HiGHS-JS Bridge] Waiting for HiGHS script to load...");
+
+          // If already loaded, resolve immediately
+          if (typeof highs !== 'undefined') {
+            console.log("[HiGHS-JS Bridge] HiGHS already loaded");
+            resolve();
+            return;
+          }
+
+          // Otherwise, listen for the script load event
+          const script = document.getElementById('highs-script');
+          if (script) {
+            script.addEventListener('load', () => {
+              console.log("[HiGHS-JS Bridge] HiGHS script loaded via event");
+              resolve();
+            });
+            script.addEventListener('error', () => {
+              console.error("[HiGHS-JS Bridge] HiGHS script failed to load");
+              reject(new Error("Failed to load HiGHS script"));
+            });
+          } else {
+            // Fallback: poll with timeout
+            let attempts = 0;
+            const maxAttempts = 50; // 5 seconds
+            const interval = setInterval(() => {
+              attempts++;
+              if (typeof highs !== 'undefined') {
+                console.log("[HiGHS-JS Bridge] HiGHS loaded after polling");
+                clearInterval(interval);
+                resolve();
+              } else if (attempts >= maxAttempts) {
+                clearInterval(interval);
+                reject(new Error("Timeout waiting for HiGHS script"));
+              }
+            }, 100);
+          }
+        });
       }
 
       // Initialize HiGHS solver asynchronously
