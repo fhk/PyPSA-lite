@@ -29,37 +29,18 @@
 
       output.value = "Initializing Pyodide...\n";
 
-      // Initialize HiGHS solver
+      // Initialize HiGHS solver (will be set during initialization)
       let highsSolver = null;
 
-      // Bridge function: solve LP/MIP problem using HiGHS
-      async function solveWithHiGHS(problem) {
+      // Synchronous bridge function: solve LP/MIP problem using HiGHS
+      function solveWithHiGHS(problem) {
         console.log("[HiGHS-JS Bridge] solveWithHiGHS called");
         console.log("[HiGHS-JS Bridge] Problem type:", typeof problem);
         console.log("[HiGHS-JS Bridge] Problem length:", problem?.length || "N/A");
         console.log("[HiGHS-JS Bridge] Problem preview:", problem?.substring(0, 200) || problem);
 
-        // Initialize solver on first use
         if (!highsSolver) {
-          console.log("[HiGHS-JS Bridge] Initializing HiGHS solver...");
-          try {
-            const highs_loader = highs;  // Global function from highs.js script
-            console.log("[HiGHS-JS Bridge] highs_loader type:", typeof highs_loader);
-
-            highsSolver = await highs_loader({
-              // In a browser, one can load the wasm file from github
-              locateFile: (file) => {
-                const url = "https://lovasoa.github.io/highs-js/" + file;
-                console.log("[HiGHS-JS Bridge] Loading WASM file:", url);
-                return url;
-              },
-            });
-            console.log("[HiGHS-JS Bridge] Solver initialized successfully");
-            console.log("[HiGHS-JS Bridge] Solver methods:", Object.keys(highsSolver));
-          } catch (error) {
-            console.error("[HiGHS-JS Bridge] Solver initialization failed:", error);
-            throw new Error("Failed to initialize HiGHS solver: " + error.message);
-          }
+          throw new Error("HiGHS solver not initialized. This should not happen!");
         }
 
         // Solve the problem
@@ -68,11 +49,35 @@
           const result = highsSolver.solve(problem);
           console.log("[HiGHS-JS Bridge] Solver completed");
           console.log("[HiGHS-JS Bridge] Result type:", typeof result);
+          console.log("[HiGHS-JS Bridge] Result keys:", Object.keys(result));
           console.log("[HiGHS-JS Bridge] Result:", result);
           return result;
         } catch (error) {
           console.error("[HiGHS-JS Bridge] Solve failed:", error);
           throw new Error("Solve failed: " + error.message);
+        }
+      }
+
+      // Initialize HiGHS solver asynchronously
+      async function initializeHiGHSSolver() {
+        console.log("[HiGHS-JS Bridge] Initializing HiGHS solver...");
+        try {
+          const highs_loader = highs;  // Global function from highs.js script
+          console.log("[HiGHS-JS Bridge] highs_loader type:", typeof highs_loader);
+
+          highsSolver = await highs_loader({
+            // In a browser, one can load the wasm file from github
+            locateFile: (file) => {
+              const url = "https://lovasoa.github.io/highs-js/" + file;
+              console.log("[HiGHS-JS Bridge] Loading WASM file:", url);
+              return url;
+            },
+          });
+          console.log("[HiGHS-JS Bridge] Solver initialized successfully");
+          console.log("[HiGHS-JS Bridge] Solver methods:", Object.keys(highsSolver));
+        } catch (error) {
+          console.error("[HiGHS-JS Bridge] Solver initialization failed:", error);
+          throw new Error("Failed to initialize HiGHS solver: " + error.message);
         }
       }
 
@@ -84,6 +89,8 @@
 
           // Initialize HiGHS solver
           output.value += "Loading HiGHS solver...\n";
+          await initializeHiGHSSolver();
+          output.value += "HiGHS solver loaded!\n";
 
           // Make the solver available to Python via the js module
           // Set on JavaScript global object so it's accessible via js.js_highs_solve in Python
