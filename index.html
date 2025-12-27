@@ -58,8 +58,21 @@
         }
       }
 
+      // Wait for HiGHS script to load
+      async function waitForHiGHS() {
+        console.log("[HiGHS-JS Bridge] Waiting for HiGHS script to load...");
+        // Poll for the highs global to be available
+        while (typeof highs === 'undefined') {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        console.log("[HiGHS-JS Bridge] HiGHS script loaded");
+      }
+
       // Initialize HiGHS solver asynchronously
       async function initializeHiGHSSolver() {
+        // Wait for the HiGHS script to load first
+        await waitForHiGHS();
+
         console.log("[HiGHS-JS Bridge] Initializing HiGHS solver...");
         try {
           const highs_loader = highs;  // Global function from highs.js script
