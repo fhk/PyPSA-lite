@@ -29,37 +29,6 @@
 
       output.value = "Initializing...\n";
 
-      // Initialize HiGHS solver promise (starts loading immediately)
-      const highs_settings = {
-        locateFile: (file) => "https://lovasoa.github.io/highs-js/" + file
-      };
-      const highs_promise = highs(highs_settings);
-
-      // Synchronous bridge function: solve LP/MIP problem using HiGHS
-      function solveWithHiGHS(problem) {
-        console.log("[HiGHS-JS Bridge] solveWithHiGHS called");
-        console.log("[HiGHS-JS Bridge] Problem type:", typeof problem);
-        console.log("[HiGHS-JS Bridge] Problem length:", problem?.length || "N/A");
-        console.log("[HiGHS-JS Bridge] Problem preview:", problem?.substring(0, 200) || problem);
-
-        // This must be called after highs_promise is resolved
-        // We'll handle this by ensuring initialization completes before exposing to Python
-        throw new Error("This should not be called directly - use async version");
-      }
-
-      // Async bridge function for Python
-      async function solveWithHiGHSAsync(problem) {
-        console.log("[HiGHS-JS Bridge] solveWithHiGHSAsync called");
-        console.log("[HiGHS-JS Bridge] Problem:", problem?.substring(0, 200));
-
-        const solver = await highs_promise;
-        console.log("[HiGHS-JS Bridge] Solver ready, calling solve()...");
-
-        const result = solver.solve(problem);
-        console.log("[HiGHS-JS Bridge] Result:", result);
-        return result;
-      }
-
       // Initialize Pyodide and load PyPSA
       async function main() {
         try {
@@ -67,9 +36,12 @@
           let pyodide = await loadPyodide();
           output.value += "Pyodide loaded!\n";
 
-          // Wait for HiGHS solver to be ready
+          // Initialize HiGHS solver
           output.value += "Loading HiGHS solver...\n";
-          const solver = await highs_promise;
+          const highs_settings = {
+            locateFile: (file) => "https://lovasoa.github.io/highs-js/" + file
+          };
+          const solver = await highs(highs_settings);
           output.value += "HiGHS solver loaded!\n";
 
           // Create a synchronous wrapper now that solver is ready
