@@ -158,7 +158,8 @@ def _parse_highs_result(result, model: Model):
     # Set objective value if available
     objective_value = result.get("ObjectiveValue")
     if objective_value is not None:
-        model.objective.value = objective_value
+        # Set internal _value attribute (same as linopy's solve method does)
+        model.objective._value = objective_value
     else:
         logger.warning("ObjectiveValue not found in HiGHS result")
 
