@@ -18,9 +18,8 @@ logger = logging.getLogger(__name__)
 def solve_with_highs_js(model: Model, **kwargs) -> tuple[str, str]:
     """Solve optimization model using HiGHS JavaScript/WebAssembly solver.
 
-    This function extracts the linear programming problem from the linopy model,
-    converts it to HiGHS JSON format, calls the JavaScript HiGHS solver,
-    and converts the solution back.
+    This function exports the linopy model to LP format, calls the JavaScript
+    HiGHS solver via Pyodide's bridge, and parses the solution back into the model.
 
     Parameters
     ----------
@@ -38,29 +37,33 @@ def solve_with_highs_js(model: Model, **kwargs) -> tuple[str, str]:
     """
     try:
         import js
-        import numpy as np
-        import scipy.sparse as sp
     except ImportError as e:
         msg = f"HiGHS-JS solver requires Pyodide environment: {e}"
         logger.error(msg)
         return "error", "unknown"
 
-    logger.info("Extracting model for HiGHS-JS solver...")
+    logger.info("Converting model to LP format for HiGHS-JS solver...")
 
-    # Get constraint matrix and bounds
-    A, b_lower, b_upper, c, sense = _extract_model_data(model)
+    # Export model to LP format via Pyodide's virtual filesystem
+    from pathlib import Path
 
-    # Get variable bounds
-    v_lower, v_upper = _extract_variable_bounds(model)
+    # Use a simple path in Pyodide's virtual filesystem
+    lp_path = Path("/tmp/highs_problem.lp")
 
-    # Build HiGHS problem dictionary
-    problem = _build_highs_problem(A, b_lower, b_upper, c, v_lower, v_upper, sense)
+    # Write model to LP file
+    model.to_file(lp_path, io_api="lp")
 
-    logger.info(f"Calling HiGHS-JS solver with {len(problem['cols'])} variables and {len(problem['rows'])} constraints...")
+    # Read LP file as string
+    lp_string = lp_path.read_text()
+
+    # Clean up
+    lp_path.unlink()
+
+    logger.info(f"Calling HiGHS-JS solver...")
 
     # Call JavaScript HiGHS solver
     try:
-        result = js.js_highs_solve(problem)
+        result = js.js_highs_solve(lp_string)
     except Exception as e:
         msg = f"HiGHS-JS solver failed: {e}"
         logger.error(msg)
@@ -70,130 +73,6 @@ def solve_with_highs_js(model: Model, **kwargs) -> tuple[str, str]:
     status, condition = _parse_highs_result(result, model)
 
     return status, condition
-
-
-def _extract_model_data(model: Model):
-    """Extract constraint matrix and objective from linopy model.
-
-    Uses linopy's built-in matrix accessor for proper model conversion.
-    """
-    import numpy as np
-    import scipy.sparse as sp
-
-    # Use linopy's matrix accessor to get properly formatted matrices
-    matrices = model.matrices
-
-    # Get constraint matrix A (rows=constraints, cols=variables)
-    A = matrices.A
-    if A is None:
-        # No constraints - create empty matrix
-        n_vars = len(matrices.vlabels)
-        A = sp.csr_matrix((0, n_vars))
-
-    # Get objective coefficients
-    c = matrices.c
-    if c is None:
-        c = np.zeros(len(matrices.vlabels))
-    elif hasattr(c, 'values'):
-        # If it's a pandas Series, extract values
-        c = c.values
-    # Otherwise c is already a numpy array
-
-    # Get constraint bounds
-    b = matrices.b
-    sense = matrices.sense
-
-    # Extract values if pandas Series, otherwise already numpy arrays
-    if hasattr(b, 'values'):
-        b = b.values
-    if hasattr(sense, 'values'):
-        sense = sense.values
-
-    # Convert constraint bounds to lower/upper format
-    b_lower = np.full(len(b), -np.inf)
-    b_upper = np.full(len(b), np.inf)
-
-    for i, (b_val, s) in enumerate(zip(b, sense)):
-        if s == "==":
-            b_lower[i] = b_val
-            b_upper[i] = b_val
-        elif s == ">=":
-            b_lower[i] = b_val
-            b_upper[i] = np.inf
-        elif s == "<=":
-            b_lower[i] = -np.inf
-            b_upper[i] = b_val
-
-    # Get objective sense
-    objective_sense = "minimize" if model.objective.sense == "min" else "maximize"
-
-    return A, b_lower, b_upper, c, objective_sense
-
-
-def _extract_variable_bounds(model: Model):
-    """Extract variable bounds from linopy model.
-
-    Uses linopy's built-in matrix accessor for proper bounds extraction.
-    """
-    import numpy as np
-
-    matrices = model.matrices
-
-    # Get variable bounds from matrices accessor
-    v_lower = matrices.lb
-    v_upper = matrices.ub
-
-    # Extract values if pandas Series, otherwise already numpy arrays
-    if hasattr(v_lower, 'values'):
-        v_lower = v_lower.values
-    if hasattr(v_upper, 'values'):
-        v_upper = v_upper.values
-
-    # Replace NaN with infinity
-    v_lower = np.where(np.isnan(v_lower), -np.inf, v_lower)
-    v_upper = np.where(np.isnan(v_upper), np.inf, v_upper)
-
-    return v_lower, v_upper
-
-
-def _build_highs_problem(A, b_lower, b_upper, c, v_lower, v_upper, sense):
-    """Build HiGHS JSON problem format."""
-    import numpy as np
-
-    problem = {
-        "sense": sense,
-        "offset": 0.0,
-        "cols": [],
-        "rows": [],
-    }
-
-    # Add variables (columns)
-    for i in range(len(c)):
-        col = {
-            "name": f"x{i}",
-            "obj": float(c[i]) if not np.isnan(c[i]) else 0.0,
-        }
-        if not np.isinf(v_lower[i]):
-            col["lb"] = float(v_lower[i])
-        if not np.isinf(v_upper[i]):
-            col["ub"] = float(v_upper[i])
-        problem["cols"].append(col)
-
-    # Add constraints (rows)
-    for i in range(A.shape[0]):
-        row = {"coeffs": []}
-        row_data = A.getrow(i)
-        for j, val in zip(row_data.indices, row_data.data):
-            row["coeffs"].append({"col": int(j), "val": float(val)})
-
-        if not np.isinf(b_lower[i]):
-            row["lb"] = float(b_lower[i])
-        if not np.isinf(b_upper[i]):
-            row["ub"] = float(b_upper[i])
-
-        problem["rows"].append(row)
-
-    return problem
 
 
 def _parse_highs_result(result, model: Model):

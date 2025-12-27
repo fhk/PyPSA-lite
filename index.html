@@ -30,20 +30,21 @@
       output.value = "Initializing Pyodide...\n";
 
       // Initialize HiGHS solver
-      let highs = null;
+      let highsSolver = null;
 
       // Bridge function: solve LP/MIP problem using HiGHS
       async function solveWithHiGHS(problem) {
-        if (!highs) {
-          const highs_loader = require("highs");
-          const highs = await highs_loader({
+        // Initialize solver on first use
+        if (!highsSolver) {
+          const highs_loader = highs;  // Global function from highs.js script
+          highsSolver = await highs_loader({
             // In a browser, one can load the wasm file from github
             locateFile: (file) => "https://lovasoa.github.io/highs-js/" + file,
           });
         }
 
         // Solve the problem
-        const result = highs.solve(problem);
+        const result = highsSolver.solve(problem);
         return result;
       }
 
