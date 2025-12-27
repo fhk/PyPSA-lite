@@ -61,16 +61,47 @@ def solve_with_highs_js(model: Model, **kwargs) -> tuple[str, str]:
 
     logger.info(f"Calling HiGHS-JS solver...")
 
-    # Call JavaScript HiGHS solver (async function)
+    # Call JavaScript HiGHS solver (async function returns a Promise)
     try:
-        # The JS function is async, so we get a PyodideFuture
-        # In Pyodide, we use .then() to convert the Promise to a Python value
-        result_future = js.js_highs_solve(lp_string)
+        # Since the JS function is async, we get a Promise
+        # We need to await it using Pyodide's async handling
+        from pyodide.ffi import to_js
+        from js import Promise
 
-        # PyodideFuture can be converted using .then() which returns immediately
-        # We need to use Pyodide's promise handling
-        import pyodide_js
-        result = pyodide_js.await_promise(result_future)
+        # Call the async function
+        promise = js.js_highs_solve(lp_string)
+
+        # Wait for the Promise to resolve using a helper
+        # Create a flag to track completion
+        result_container = {'value': None, 'error': None, 'done': False}
+
+        def on_success(value):
+            result_container['value'] = value
+            result_container['done'] = True
+
+        def on_error(error):
+            result_container['error'] = str(error)
+            result_container['done'] = True
+
+        # Attach then/catch handlers
+        promise.then(on_success).catch(on_error)
+
+        # Spin wait for completion (in browser event loop)
+        import time
+        timeout = 30  # seconds
+        elapsed = 0
+        while not result_container['done'] and elapsed < timeout:
+            time.sleep(0.01)
+            elapsed += 0.01
+
+        if result_container['error']:
+            raise Exception(result_container['error'])
+
+        if not result_container['done']:
+            raise Exception("Timeout waiting for HiGHS solver")
+
+        result = result_container['value']
+        logger.info(f"HiGHS-JS result type: {type(result)}")
     except Exception as e:
         msg = f"HiGHS-JS solver failed: {e}"
         logger.error(msg)
