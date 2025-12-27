@@ -3,7 +3,7 @@
   <head>
     <title>PyPSA in Browser</title>
     <script src="https://cdn.jsdelivr.net/pyodide/v0.27.7/full/pyodide.js"></script>
-    <script src="https://lovasoa.github.io/highs-js/highs.js" id="highs-script"></script>
+    <script src="https://lovasoa.github.io/highs-js/highs.js"></script>
   </head>
 
   <body>
@@ -27,31 +27,67 @@
         output.value += ">>> " + code.value + "\n" + s + "\n";
       }
 
-      output.value = "Initializing...\n";
+      output.value = "Initializing Pyodide...\n";
+
+      // Initialize HiGHS solver
+      let highsSolver = null;
+
+      // Bridge function: solve LP/MIP problem using HiGHS
+      async function solveWithHiGHS(problem) {
+        console.log("[HiGHS-JS Bridge] solveWithHiGHS called");
+        console.log("[HiGHS-JS Bridge] Problem type:", typeof problem);
+        console.log("[HiGHS-JS Bridge] Problem length:", problem?.length || "N/A");
+        console.log("[HiGHS-JS Bridge] Problem preview:", problem?.substring(0, 200) || problem);
+
+        // Initialize solver on first use
+        if (!highsSolver) {
+          console.log("[HiGHS-JS Bridge] Initializing HiGHS solver...");
+          try {
+            const highs_loader = highs;  // Global function from highs.js script
+            console.log("[HiGHS-JS Bridge] highs_loader type:", typeof highs_loader);
+
+            highsSolver = await highs_loader({
+              // In a browser, one can load the wasm file from github
+              locateFile: (file) => {
+                const url = "https://lovasoa.github.io/highs-js/" + file;
+                console.log("[HiGHS-JS Bridge] Loading WASM file:", url);
+                return url;
+              },
+            });
+            console.log("[HiGHS-JS Bridge] Solver initialized successfully");
+            console.log("[HiGHS-JS Bridge] Solver methods:", Object.keys(highsSolver));
+          } catch (error) {
+            console.error("[HiGHS-JS Bridge] Solver initialization failed:", error);
+            throw new Error("Failed to initialize HiGHS solver: " + error.message);
+          }
+        }
+
+        // Solve the problem
+        console.log("[HiGHS-JS Bridge] Calling solver.solve()...");
+        try {
+          const result = highsSolver.solve(problem);
+          console.log("[HiGHS-JS Bridge] Solver completed");
+          console.log("[HiGHS-JS Bridge] Result type:", typeof result);
+          console.log("[HiGHS-JS Bridge] Result:", result);
+          return result;
+        } catch (error) {
+          console.error("[HiGHS-JS Bridge] Solve failed:", error);
+          throw new Error("Solve failed: " + error.message);
+        }
+      }
 
       // Initialize Pyodide and load PyPSA
       async function main() {
         try {
-          output.value += "Initializing Pyodide...\n";
           let pyodide = await loadPyodide();
           output.value += "Pyodide loaded!\n";
 
           // Initialize HiGHS solver
           output.value += "Loading HiGHS solver...\n";
-          const highs_settings = {
-            locateFile: (file) => "https://lovasoa.github.io/highs-js/" + file
-          };
-          const solver = await highs(highs_settings);
-          output.value += "HiGHS solver loaded!\n";
 
-          // Create a synchronous wrapper now that solver is ready
-          globalThis.js_highs_solve = function(problem) {
-            console.log("[HiGHS-JS Bridge] js_highs_solve called");
-            console.log("[HiGHS-JS Bridge] Problem:", problem?.substring(0, 200));
-            const result = solver.solve(problem);
-            console.log("[HiGHS-JS Bridge] Result:", result);
-            return result;
-          };
+          // Make the solver available to Python via the js module
+          // Set on JavaScript global object so it's accessible via js.js_highs_solve in Python
+          globalThis.js_highs_solve = solveWithHiGHS;
           console.log("[HiGHS-JS Bridge] Exposed js_highs_solve to Python");
 
           output.value += "Loading micropip...\n";
