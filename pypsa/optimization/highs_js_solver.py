@@ -72,12 +72,54 @@ def solve_with_highs_js(model: Model, **kwargs) -> tuple[str, str]:
     return status, condition
 
 
+def _linear_expression_to_sparse(expr):
+    """Convert a LinearExpression to scipy sparse matrix.
+
+    Parameters
+    ----------
+    expr : LinearExpression
+        The linear expression to convert
+
+    Returns
+    -------
+    scipy.sparse.csr_matrix
+        Sparse matrix representation of the expression
+    """
+    import numpy as np
+    import scipy.sparse as sp
+
+    # Get coefficients and variable indices
+    coeffs = expr.coeffs.to_numpy()  # Shape: (n_constraints, n_terms)
+    vars_idx = expr.vars.to_numpy()  # Shape: (n_constraints, n_terms)
+
+    # Flatten for building sparse matrix
+    n_rows = coeffs.shape[0]
+    n_cols = int(vars_idx.max()) + 1 if vars_idx.size > 0 else 0
+
+    # Build coordinate lists for sparse matrix
+    row_indices = []
+    col_indices = []
+    data = []
+
+    for i in range(n_rows):
+        for j in range(coeffs.shape[1]):
+            var_idx = vars_idx[i, j]
+            coeff = coeffs[i, j]
+            # Skip invalid entries (var_idx == -1 means empty)
+            if var_idx >= 0 and not np.isnan(coeff):
+                row_indices.append(i)
+                col_indices.append(int(var_idx))
+                data.append(coeff)
+
+    return sp.csr_matrix((data, (row_indices, col_indices)), shape=(n_rows, n_cols))
+
+
 def _extract_model_data(model: Model):
     """Extract constraint matrix and objective from linopy model."""
     import numpy as np
 
-    # Get objective
-    obj_coeffs = model.objective.get_constant_and_coeffs()[1]
+    # Get objective coefficients
+    obj_coeffs = model.objective.coeffs
     c = obj_coeffs.to_numpy().flatten()
 
     # Get constraints
@@ -88,14 +130,19 @@ def _extract_model_data(model: Model):
 
     for con_name in constraints:
         con = constraints[con_name]
-        # Get constraint matrix
+        # Get constraint matrix from lhs LinearExpression
         lhs = con.lhs
-        A_con = lhs.get_constant_and_coeffs()[1].to_scipy_sparse()
+        A_con = _linear_expression_to_sparse(lhs)
         A_list.append(A_con)
 
-        # Get RHS bounds
+        # Get RHS bounds and adjust for lhs constant term
         sign = con.sign
         rhs = con.rhs.to_numpy().flatten()
+
+        # If lhs has a constant, subtract it from rhs
+        # (e.g., 2x + 3 >= 5 becomes 2x >= 2)
+        lhs_const = lhs.const.to_numpy().flatten()
+        rhs = rhs - lhs_const
 
         if sign == "==":
             b_lower_list.append(rhs)
