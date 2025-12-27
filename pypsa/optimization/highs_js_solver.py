@@ -94,12 +94,20 @@ def _extract_model_data(model: Model):
     c = matrices.c
     if c is None:
         c = np.zeros(len(matrices.vlabels))
-    else:
+    elif hasattr(c, 'values'):
+        # If it's a pandas Series, extract values
         c = c.values
+    # Otherwise c is already a numpy array
 
     # Get constraint bounds
     b = matrices.b
     sense = matrices.sense
+
+    # Extract values if pandas Series, otherwise already numpy arrays
+    if hasattr(b, 'values'):
+        b = b.values
+    if hasattr(sense, 'values'):
+        sense = sense.values
 
     # Convert constraint bounds to lower/upper format
     b_lower = np.full(len(b), -np.inf)
@@ -132,8 +140,14 @@ def _extract_variable_bounds(model: Model):
     matrices = model.matrices
 
     # Get variable bounds from matrices accessor
-    v_lower = matrices.lb.values
-    v_upper = matrices.ub.values
+    v_lower = matrices.lb
+    v_upper = matrices.ub
+
+    # Extract values if pandas Series, otherwise already numpy arrays
+    if hasattr(v_lower, 'values'):
+        v_lower = v_lower.values
+    if hasattr(v_upper, 'values'):
+        v_upper = v_upper.values
 
     # Replace NaN with infinity
     v_lower = np.where(np.isnan(v_lower), -np.inf, v_lower)
