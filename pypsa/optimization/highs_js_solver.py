@@ -72,125 +72,72 @@ def solve_with_highs_js(model: Model, **kwargs) -> tuple[str, str]:
     return status, condition
 
 
-def _linear_expression_to_sparse(expr):
-    """Convert a LinearExpression to scipy sparse matrix.
+def _extract_model_data(model: Model):
+    """Extract constraint matrix and objective from linopy model.
 
-    Parameters
-    ----------
-    expr : LinearExpression
-        The linear expression to convert
-
-    Returns
-    -------
-    scipy.sparse.csr_matrix
-        Sparse matrix representation of the expression
+    Uses linopy's built-in matrix accessor for proper model conversion.
     """
     import numpy as np
     import scipy.sparse as sp
 
-    # Get coefficients and variable indices
-    coeffs = expr.coeffs.to_numpy()  # Shape: (n_constraints, n_terms)
-    vars_idx = expr.vars.to_numpy()  # Shape: (n_constraints, n_terms)
+    # Use linopy's matrix accessor to get properly formatted matrices
+    matrices = model.matrices
 
-    # Flatten for building sparse matrix
-    n_rows = coeffs.shape[0]
-    n_cols = int(vars_idx.max()) + 1 if vars_idx.size > 0 else 0
-
-    # Build coordinate lists for sparse matrix
-    row_indices = []
-    col_indices = []
-    data = []
-
-    for i in range(n_rows):
-        for j in range(coeffs.shape[1]):
-            var_idx = vars_idx[i, j]
-            coeff = coeffs[i, j]
-            # Skip invalid entries (var_idx == -1 means empty)
-            if var_idx >= 0 and not np.isnan(coeff):
-                row_indices.append(i)
-                col_indices.append(int(var_idx))
-                data.append(float(coeff))
-
-    # Convert to proper 1-D numpy arrays
-    data = np.array(data, dtype=float)
-    row_indices = np.array(row_indices, dtype=int)
-    col_indices = np.array(col_indices, dtype=int)
-
-    return sp.csr_matrix((data, (row_indices, col_indices)), shape=(n_rows, n_cols))
-
-
-def _extract_model_data(model: Model):
-    """Extract constraint matrix and objective from linopy model."""
-    import numpy as np
+    # Get constraint matrix A (rows=constraints, cols=variables)
+    A = matrices.A
+    if A is None:
+        # No constraints - create empty matrix
+        n_vars = len(matrices.vlabels)
+        A = sp.csr_matrix((0, n_vars))
 
     # Get objective coefficients
-    obj_coeffs = model.objective.coeffs
-    c = obj_coeffs.to_numpy().flatten()
+    c = matrices.c
+    if c is None:
+        c = np.zeros(len(matrices.vlabels))
+    else:
+        c = c.values
 
-    # Get constraints
-    constraints = model.constraints
-    A_list = []
-    b_lower_list = []
-    b_upper_list = []
+    # Get constraint bounds
+    b = matrices.b
+    sense = matrices.sense
 
-    for con_name in constraints:
-        con = constraints[con_name]
-        # Get constraint matrix from lhs LinearExpression
-        lhs = con.lhs
-        A_con = _linear_expression_to_sparse(lhs)
-        A_list.append(A_con)
+    # Convert constraint bounds to lower/upper format
+    b_lower = np.full(len(b), -np.inf)
+    b_upper = np.full(len(b), np.inf)
 
-        # Get RHS bounds and adjust for lhs constant term
-        sign = con.sign
-        rhs = con.rhs.to_numpy().flatten()
-
-        # If lhs has a constant, subtract it from rhs
-        # (e.g., 2x + 3 >= 5 becomes 2x >= 2)
-        lhs_const = lhs.const.to_numpy().flatten()
-        rhs = rhs - lhs_const
-
-        if sign == "==":
-            b_lower_list.append(rhs)
-            b_upper_list.append(rhs)
-        elif sign == ">=":
-            b_lower_list.append(rhs)
-            b_upper_list.append(np.full_like(rhs, np.inf))
-        elif sign == "<=":
-            b_lower_list.append(np.full_like(rhs, -np.inf))
-            b_upper_list.append(rhs)
-
-    import scipy.sparse as sp
-    A = sp.vstack(A_list) if A_list else sp.csr_matrix((0, len(c)))
-    b_lower = np.concatenate(b_lower_list) if b_lower_list else np.array([])
-    b_upper = np.concatenate(b_upper_list) if b_upper_list else np.array([])
+    for i, (b_val, s) in enumerate(zip(b, sense)):
+        if s == "==":
+            b_lower[i] = b_val
+            b_upper[i] = b_val
+        elif s == ">=":
+            b_lower[i] = b_val
+            b_upper[i] = np.inf
+        elif s == "<=":
+            b_lower[i] = -np.inf
+            b_upper[i] = b_val
 
     # Get objective sense
-    sense = "minimize" if model.objective.sense == "min" else "maximize"
+    objective_sense = "minimize" if model.objective.sense == "min" else "maximize"
 
-    return A, b_lower, b_upper, c, sense
+    return A, b_lower, b_upper, c, objective_sense
 
 
 def _extract_variable_bounds(model: Model):
-    """Extract variable bounds from linopy model."""
+    """Extract variable bounds from linopy model.
+
+    Uses linopy's built-in matrix accessor for proper bounds extraction.
+    """
     import numpy as np
 
-    variables = model.variables
-    n_vars = len(model.variables)
+    matrices = model.matrices
 
-    v_lower = np.full(n_vars, -np.inf)
-    v_upper = np.full(n_vars, np.inf)
+    # Get variable bounds from matrices accessor
+    v_lower = matrices.lb.values
+    v_upper = matrices.ub.values
 
-    idx = 0
-    for var_name in variables:
-        var = variables[var_name]
-        size = var.size
-
-        if hasattr(var, "lower") and var.lower is not None:
-            v_lower[idx:idx+size] = var.lower.to_numpy().flatten()
-        if hasattr(var, "upper") and var.upper is not None:
-            v_upper[idx:idx+size] = var.upper.to_numpy().flatten()
-
-        idx += size
+    # Replace NaN with infinity
+    v_lower = np.where(np.isnan(v_lower), -np.inf, v_lower)
+    v_upper = np.where(np.isnan(v_upper), np.inf, v_upper)
 
     return v_lower, v_upper
 
