@@ -110,8 +110,12 @@ def _parse_highs_result(result, model: Model):
         "Unbounded": ("warning", "unbounded"),
     }
 
-    # Access JsProxy object properties using bracket notation or attribute access
-    result_status = result["Status"] if "Status" in result else "Unknown"
+    # Access JsProxy object properties using bracket notation with try/except
+    try:
+        result_status = result["Status"]
+    except (KeyError, TypeError):
+        result_status = "Unknown"
+
     status, condition = status_map.get(result_status, ("error", "unknown"))
 
     if status != "ok":
@@ -120,13 +124,22 @@ def _parse_highs_result(result, model: Model):
 
     # Extract solution values from Columns dict
     # Columns is a JsProxy object like: {"x0": {"Primal": 100, ...}, "x1": {...}, ...}
-    columns = result["Columns"] if "Columns" in result else {}
+    try:
+        columns = result["Columns"]
+    except (KeyError, TypeError):
+        columns = {}
 
     # Sort by variable name (x0, x1, x2, ...) to ensure correct order
     sorted_vars = sorted(columns.keys(), key=lambda x: int(x[1:]) if x.startswith('x') else x)
+
     # Access Primal values from JsProxy column objects
-    solution_values = np.array([columns[var_name]["Primal"] if "Primal" in columns[var_name] else 0.0
-                                for var_name in sorted_vars])
+    def get_primal(col):
+        try:
+            return col["Primal"]
+        except (KeyError, TypeError):
+            return 0.0
+
+    solution_values = np.array([get_primal(columns[var_name]) for var_name in sorted_vars])
 
     # Assign solution to model variables
     idx = 0
@@ -141,8 +154,10 @@ def _parse_highs_result(result, model: Model):
         idx += size
 
     # Set objective value if available
-    if "ObjectiveValue" in result:
+    try:
         model.objective.value = result["ObjectiveValue"]
+    except (KeyError, TypeError):
+        logger.warning("ObjectiveValue not found in HiGHS result")
 
     logger.info(f"HiGHS-JS solver completed successfully. Objective: {model.objective.value}")
 
