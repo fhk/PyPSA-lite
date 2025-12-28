@@ -169,6 +169,9 @@ print(n.statistics().to_string())</textarea
 
           output.value += "PyPSA installed successfully!\n";
           output.value += "HiGHS-JS solver bridge is ready!\n";
+          output.value += "\nReady! You can now run Python code.\n";
+
+          return pyodide;
         } catch (err) {
           output.value += "Error: " + err + "\n";
           console.error(err);
