@@ -9,37 +9,23 @@
   <body>
     <h1>PyPSA Demo</h1>
     <p>
-      You can execute any Python code. Edit the code below and click the button to run it.
+      You can execute any Python code. Just enter something in the box below and
+      click the button.
     </p>
-    <div>Code:</div>
-    <textarea id="code" style="width: 100%; font-family: monospace" rows="15">import pypsa
-
-# Create a new network
-n = pypsa.Network()
-
-# Add components
-n.add("Bus", "mybus")
-n.add("Load", "myload", bus="mybus", p_set=100)
-n.add("Generator", "mygen", bus="mybus", p_nom=100, marginal_cost=20)
-
-# Optimize the network using HiGHS-JS solver
-print("Optimizing network with HiGHS WebAssembly solver...")
-status, condition = n.optimize(solver_name="highs-js")
-print(f"Optimization complete! Status: {status}, Condition: {condition}")
-
-# Get statistics
-print("\\nNetwork Statistics:")
-print(n.statistics().to_string())</textarea>
-    <br />
+    <input id="code" value="sum([1, 2, 3, 4, 5])" style="width: 100%" />
     <button onclick="evaluatePython()">Run</button>
     <br />
     <br />
     <div>Output:</div>
-    <textarea id="output" style="width: 100%; font-family: monospace" rows="20" disabled></textarea>
+    <textarea id="output" style="width: 100%" rows="20" disabled></textarea>
 
     <script>
       const output = document.getElementById("output");
       const code = document.getElementById("code");
+
+      function addToOutput(s) {
+        output.value += ">>> " + code.value + "\n" + s + "\n";
+      }
 
       output.value = "Initializing Pyodide...\n";
 
@@ -140,9 +126,6 @@ print(n.statistics().to_string())</textarea>
           let pyodide = await loadPyodide();
           output.value += "Pyodide loaded!\n";
 
-          // Configure Python stdout to write to output textarea
-          pyodide.setStdout({ batched: (msg) => { output.value += msg + "\n"; } });
-
           // Initialize HiGHS solver
           output.value += "Loading HiGHS solver...\n";
 
@@ -232,23 +215,11 @@ print(n.statistics().to_string())
 
       async function evaluatePython() {
         let pyodide = await pyodideReadyPromise;
-        if (!pyodide) {
-          output.value += "\nError: Pyodide not initialized yet. Please wait...\n";
-          return;
-        }
         try {
-          output.value += "\n" + "=".repeat(60) + "\n";
-          output.value += "Running code...\n";
-          output.value += "=".repeat(60) + "\n";
           let result = await pyodide.runPythonAsync(code.value);
-          // Print statements go to stdout, only show final result if not None
-          if (result !== undefined && result !== null) {
-            output.value += "\nResult: " + result + "\n";
-          }
-          output.value += "=".repeat(60) + "\n";
+          addToOutput(result);
         } catch (err) {
-          output.value += "\nError: " + err + "\n";
-          output.value += "=".repeat(60) + "\n";
+          addToOutput(err);
         }
       }
     </script>
