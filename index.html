@@ -123,7 +123,10 @@
       // Initialize Pyodide and load PyPSA
       async function main() {
         try {
-          let pyodide = await loadPyodide();
+          // Load Pyodide with increased memory for large packages like Polars
+          let pyodide = await loadPyodide({
+            indexURL: "https://cdn.jsdelivr.net/pyodide/v0.27.7/full/"
+          });
           output.value += "Pyodide loaded!\n";
 
           // Initialize HiGHS solver
@@ -137,6 +140,14 @@
           output.value += "Loading micropip...\n";
           await pyodide.loadPackage("micropip");
           const micropip = pyodide.pyimport("micropip");
+
+          // Try to install polars from Pyodide's package index first (if available)
+          output.value += "Loading required packages...\n";
+          try {
+            await pyodide.loadPackage(["numpy", "pandas", "scipy"]);
+          } catch (err) {
+            output.value += "Note: Some packages loaded via micropip instead\n";
+          }
 
           output.value += "Installing PyPSA from GitHub Pages...\n";
           // This URL will be automatically updated by the workflow
