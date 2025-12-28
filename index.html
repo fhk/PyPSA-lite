@@ -137,10 +137,7 @@ print(n.statistics().to_string())</textarea>
       // Initialize Pyodide and load PyPSA
       async function main() {
         try {
-          // Load Pyodide with increased memory for large packages like Polars
-          let pyodide = await loadPyodide({
-            indexURL: "https://cdn.jsdelivr.net/pyodide/v0.27.7/full/"
-          });
+          let pyodide = await loadPyodide();
           output.value += "Pyodide loaded!\n";
 
           // Configure Python stdout to write to output textarea
@@ -157,14 +154,6 @@ print(n.statistics().to_string())</textarea>
           output.value += "Loading micropip...\n";
           await pyodide.loadPackage("micropip");
           const micropip = pyodide.pyimport("micropip");
-
-          // Try to install polars from Pyodide's package index first (if available)
-          output.value += "Loading required packages...\n";
-          try {
-            await pyodide.loadPackage(["numpy", "pandas", "scipy"]);
-          } catch (err) {
-            output.value += "Note: Some packages loaded via micropip instead\n";
-          }
 
           output.value += "Installing PyPSA from GitHub Pages...\n";
           // This URL will be automatically updated by the workflow
