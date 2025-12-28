@@ -1,0 +1,922 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PyPSA Network Editor</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.27.7/full/pyodide.js"></script>
+  <script src="https://lovasoa.github.io/highs-js/highs.js"></script>
+  <style>
+    body { margin: 0; overflow: hidden; }
+    .font-mono { font-family: Monaco, Menlo, "Ubuntu Mono", Consolas, monospace; }
+  </style>
+</head>
+<body class="bg-gray-900">
+  <div id="app" class="flex flex-col h-screen">
+    <!-- Toolbar -->
+    <div id="toolbar" class="flex items-center gap-2 p-3 bg-gray-800 border-b border-gray-700">
+      <span class="text-gray-300 font-medium mr-2">Tools:</span>
+      <div id="tool-buttons" class="flex gap-2"></div>
+      <div class="flex-1"></div>
+      <button id="json-toggle" class="px-4 py-2 rounded-lg font-medium bg-purple-600 text-white">{ } JSON</button>
+      <button id="clear-btn" class="px-4 py-2 rounded-lg font-medium bg-red-600 text-white hover:bg-red-500">Clear All</button>
+    </div>
+
+    <!-- Main Content -->
+    <div class="flex flex-1 overflow-hidden">
+      <!-- Left Panel: Canvas + Python -->
+      <div id="left-panel" class="w-2/3 flex flex-col overflow-hidden">
+        <!-- Canvas -->
+        <div class="flex-1 p-4 overflow-hidden">
+          <canvas id="canvas" class="rounded-lg cursor-crosshair shadow-2xl"></canvas>
+        </div>
+        
+        <!-- Python Panel -->
+        <div id="python-panel" class="h-64 border-t border-gray-700 flex flex-col">
+          <div class="p-2 bg-gray-800 border-b border-gray-700 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+              <span class="text-yellow-400">🐍</span>
+              <span class="text-gray-300 font-medium">Python Code</span>
+              <span id="pyodide-status" class="text-xs text-yellow-400">⏳ Loading PyPSA...</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <button id="copy-btn" class="px-3 py-1 text-xs rounded bg-gray-700 text-gray-300 hover:bg-gray-600">Copy</button>
+              <button id="run-btn" class="px-3 py-1 text-xs rounded bg-gray-600 text-gray-400 cursor-not-allowed" disabled>▶ Run</button>
+            </div>
+          </div>
+          <div class="flex-1 flex overflow-hidden">
+            <pre id="code-display" class="w-1/2 bg-gray-950 text-blue-400 font-mono text-xs p-3 m-0 overflow-auto border-r border-gray-700"></pre>
+            <div class="w-1/2 flex flex-col">
+              <div class="p-1 bg-gray-800 border-b border-gray-700 flex items-center justify-between">
+                <span class="text-gray-400 text-xs">Output</span>
+                <button id="clear-output-btn" class="px-2 py-0.5 text-xs rounded bg-gray-700 text-gray-400 hover:bg-gray-600">Clear</button>
+              </div>
+              <pre id="output-display" class="flex-1 bg-black text-green-400 font-mono text-xs p-3 m-0 overflow-auto"></pre>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right Panel: JSON -->
+      <div id="json-panel" class="w-1/3 border-l border-gray-700 flex flex-col">
+        <div class="p-2 bg-gray-800 border-b border-gray-700 flex items-center justify-between">
+          <div>
+            <span class="text-gray-300 font-medium">Canvas JSON</span>
+            <span class="ml-2 text-xs text-gray-500">Edit to update canvas</span>
+          </div>
+          <div id="json-status" class="flex items-center gap-2">
+            <span class="text-xs text-green-400">✓ Synced</span>
+          </div>
+        </div>
+        <div class="flex-1 overflow-hidden">
+          <textarea id="json-editor" class="w-full h-full bg-gray-950 text-green-400 font-mono text-xs p-3 resize-none border-none outline-none" spellcheck="false"></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- Status Bar -->
+    <div class="p-3 bg-gray-800 border-t border-gray-700 text-gray-400 text-sm">
+      <span class="mr-6"><strong class="text-gray-300">Components:</strong> <span id="shape-count">0</span></span>
+      <span class="mr-6"><strong class="text-gray-300">Connections:</strong> <span id="line-count">0</span></span>
+      <span id="tool-hint">Click on the canvas to place a Bus</span>
+    </div>
+
+    <!-- Modal -->
+    <div id="modal" class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 hidden">
+      <div class="bg-gray-800 rounded-lg p-6 shadow-xl border border-gray-700 min-w-80">
+        <h2 id="modal-title" class="text-xl font-bold text-white mb-4">Create Component</h2>
+        <div id="modal-fields"></div>
+        <div class="flex justify-end gap-3 mt-4">
+          <button id="modal-cancel" class="px-4 py-2 rounded-lg font-medium bg-gray-700 text-gray-300 hover:bg-gray-600">Cancel</button>
+          <button id="modal-create" class="px-4 py-2 rounded-lg font-medium bg-blue-600 text-white hover:bg-blue-500">Create</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Constants
+    const SHAPE_SIZE = 60;
+    const SNAP_DISTANCE = 15;
+
+    // State
+    let shapes = [];
+    let lines = [];
+    let selectedTool = 'circle';
+    let selectedShape = null;
+    let dragging = null;
+    let drawingLine = null;
+    let hoveredVertex = null;
+    let mousePos = { x: 0, y: 0 };
+    let showJson = true;
+    let isEditingJson = false;
+    let pyodide = null;
+    let pyodideReady = false;
+    let isRunning = false;
+    let highsSolver = null;
+
+    // DOM Elements
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const toolButtons = document.getElementById('tool-buttons');
+    const jsonToggle = document.getElementById('json-toggle');
+    const clearBtn = document.getElementById('clear-btn');
+    const jsonPanel = document.getElementById('json-panel');
+    const leftPanel = document.getElementById('left-panel');
+    const jsonEditor = document.getElementById('json-editor');
+    const jsonStatus = document.getElementById('json-status');
+    const codeDisplay = document.getElementById('code-display');
+    const outputDisplay = document.getElementById('output-display');
+    const copyBtn = document.getElementById('copy-btn');
+    const runBtn = document.getElementById('run-btn');
+    const clearOutputBtn = document.getElementById('clear-output-btn');
+    const pyodideStatus = document.getElementById('pyodide-status');
+    const shapeCount = document.getElementById('shape-count');
+    const lineCount = document.getElementById('line-count');
+    const toolHint = document.getElementById('tool-hint');
+    const modal = document.getElementById('modal');
+    const modalTitle = document.getElementById('modal-title');
+    const modalFields = document.getElementById('modal-fields');
+    const modalCancel = document.getElementById('modal-cancel');
+    const modalCreate = document.getElementById('modal-create');
+
+    // Tools configuration
+    const tools = [
+      { id: 'select', label: 'Select', icon: '↖' },
+      { id: 'circle', label: 'Bus', icon: '○' },
+      { id: 'square', label: 'Load', icon: '□' },
+      { id: 'triangle', label: 'Generator', icon: '△' },
+      { id: 'line', label: 'Connect', icon: '/' },
+    ];
+
+    const shapeLabels = { circle: 'Bus', square: 'Load', triangle: 'Generator' };
+
+    const modalFieldsConfig = {
+      circle: [{ key: 'p_set', label: 'p_set (Power Setpoint)' }],
+      triangle: [
+        { key: 'p_nom', label: 'p_nom (Nominal Power)' },
+        { key: 'marginal_cost', label: 'marginal_cost' },
+      ],
+    };
+
+    // Pending shape for modal
+    let pendingShape = null;
+    let modalValues = {};
+
+    // Initialize tools
+    tools.forEach(tool => {
+      const btn = document.createElement('button');
+      btn.className = `px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
+        tool.id === selectedTool ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+      }`;
+      btn.innerHTML = `<span class="text-lg">${tool.icon}</span><span>${tool.label}</span>`;
+      btn.onclick = () => selectTool(tool.id);
+      btn.dataset.toolId = tool.id;
+      toolButtons.appendChild(btn);
+    });
+
+    function selectTool(toolId) {
+      selectedTool = toolId;
+      document.querySelectorAll('#tool-buttons button').forEach(btn => {
+        const isSelected = btn.dataset.toolId === toolId;
+        btn.className = `px-4 py-2 rounded-lg font-medium transition-all flex items-center gap-2 ${
+          isSelected ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'
+        }`;
+      });
+      updateToolHint();
+      draw();
+    }
+
+    function updateToolHint() {
+      if (selectedTool === 'line') {
+        toolHint.textContent = '🔗 Click on a vertex (red dot) and drag to another to connect components';
+      } else if (selectedTool === 'select') {
+        toolHint.textContent = '↖ Click to select, drag to move, Delete/Backspace to remove';
+      } else {
+        toolHint.textContent = `Click on the canvas to place a ${shapeLabels[selectedTool] || selectedTool}`;
+      }
+    }
+
+    // Canvas sizing
+    function resizeCanvas() {
+      const container = canvas.parentElement;
+      canvas.width = container.clientWidth - 32;
+      canvas.height = container.clientHeight - 32;
+      draw();
+    }
+    window.addEventListener('resize', resizeCanvas);
+
+    // Shape vertices
+    function getShapeVertices(shape) {
+      const { type, x, y } = shape;
+      const halfSize = SHAPE_SIZE / 2;
+      
+      switch (type) {
+        case 'circle':
+        case 'square':
+          return [
+            { x: x, y: y - halfSize, id: 'top' },
+            { x: x + halfSize, y: y, id: 'right' },
+            { x: x, y: y + halfSize, id: 'bottom' },
+            { x: x - halfSize, y: y, id: 'left' },
+          ];
+        case 'triangle':
+          const top = { x: x, y: y - halfSize };
+          const bottomRight = { x: x + halfSize, y: y + halfSize };
+          const bottomLeft = { x: x - halfSize, y: y + halfSize };
+          return [
+            { x: (top.x + bottomRight.x) / 2, y: (top.y + bottomRight.y) / 2, id: 'rightEdge' },
+            { x: (bottomRight.x + bottomLeft.x) / 2, y: (bottomRight.y + bottomLeft.y) / 2, id: 'bottomEdge' },
+            { x: (bottomLeft.x + top.x) / 2, y: (bottomLeft.y + top.y) / 2, id: 'leftEdge' },
+          ];
+        default:
+          return [];
+      }
+    }
+
+    function findNearestVertex(x, y, excludeShapeId = null) {
+      let nearest = null;
+      let minDist = SNAP_DISTANCE;
+
+      shapes.forEach(shape => {
+        if (shape.id === excludeShapeId) return;
+        getShapeVertices(shape).forEach(vertex => {
+          const dist = Math.sqrt((x - vertex.x) ** 2 + (y - vertex.y) ** 2);
+          if (dist < minDist) {
+            minDist = dist;
+            nearest = { shapeId: shape.id, vertexId: vertex.id, x: vertex.x, y: vertex.y };
+          }
+        });
+      });
+
+      return nearest;
+    }
+
+    function findShapeAtPoint(x, y) {
+      for (let i = shapes.length - 1; i >= 0; i--) {
+        const shape = shapes[i];
+        const halfSize = SHAPE_SIZE / 2;
+        
+        if (shape.type === 'circle') {
+          const dist = Math.sqrt((x - shape.x) ** 2 + (y - shape.y) ** 2);
+          if (dist <= halfSize) return shape;
+        } else if (shape.type === 'square') {
+          if (x >= shape.x - halfSize && x <= shape.x + halfSize &&
+              y >= shape.y - halfSize && y <= shape.y + halfSize) {
+            return shape;
+          }
+        } else if (shape.type === 'triangle') {
+          const v1 = { x: shape.x, y: shape.y - halfSize };
+          const v2 = { x: shape.x + halfSize, y: shape.y + halfSize };
+          const v3 = { x: shape.x - halfSize, y: shape.y + halfSize };
+          
+          const area = Math.abs((v2.x - v1.x) * (v3.y - v1.y) - (v3.x - v1.x) * (v2.y - v1.y));
+          const area1 = Math.abs((v1.x - x) * (v2.y - y) - (v2.x - x) * (v1.y - y));
+          const area2 = Math.abs((v2.x - x) * (v3.y - y) - (v3.x - x) * (v2.y - y));
+          const area3 = Math.abs((v3.x - x) * (v1.y - y) - (v1.x - x) * (v3.y - y));
+          
+          if (Math.abs(area - (area1 + area2 + area3)) < 1) return shape;
+        }
+      }
+      return null;
+    }
+
+    function getLineEndpoints(line) {
+      const startShape = shapes.find(s => s.id === line.startShapeId);
+      const endShape = shapes.find(s => s.id === line.endShapeId);
+      
+      if (!startShape || !endShape) return null;
+
+      const startVertices = getShapeVertices(startShape);
+      const endVertices = getShapeVertices(endShape);
+      
+      const startVertex = startVertices.find(v => v.id === line.startVertexId);
+      const endVertex = endVertices.find(v => v.id === line.endVertexId);
+
+      if (!startVertex || !endVertex) return null;
+
+      return { start: startVertex, end: endVertex };
+    }
+
+    // Mouse events
+    function getMousePos(e) {
+      const rect = canvas.getBoundingClientRect();
+      return { x: e.clientX - rect.left, y: e.clientY - rect.top };
+    }
+
+    canvas.addEventListener('mousedown', e => {
+      const pos = getMousePos(e);
+      
+      if (selectedTool === 'line') {
+        const vertex = findNearestVertex(pos.x, pos.y);
+        if (vertex) {
+          drawingLine = {
+            startShapeId: vertex.shapeId,
+            startVertexId: vertex.vertexId,
+            startX: vertex.x,
+            startY: vertex.y,
+          };
+        }
+      } else if (selectedTool === 'select') {
+        // Check delete button first
+        if (selectedShape) {
+          const selected = shapes.find(s => s.id === selectedShape);
+          if (selected) {
+            const halfSize = SHAPE_SIZE / 2;
+            const deleteX = selected.x + halfSize - 5;
+            const deleteY = selected.y - halfSize + 5;
+            const dist = Math.sqrt((pos.x - deleteX) ** 2 + (pos.y - deleteY) ** 2);
+            if (dist <= 10) {
+              deleteShape(selectedShape);
+              return;
+            }
+          }
+        }
+        
+        const shape = findShapeAtPoint(pos.x, pos.y);
+        if (shape) {
+          selectedShape = shape.id;
+          dragging = {
+            shapeId: shape.id,
+            offsetX: pos.x - shape.x,
+            offsetY: pos.y - shape.y,
+          };
+        } else {
+          selectedShape = null;
+        }
+        draw();
+      } else {
+        // Create shape
+        const newShape = {
+          id: Date.now(),
+          type: selectedTool,
+          x: mousePos.x,
+          y: mousePos.y,
+        };
+        
+        if (selectedTool === 'circle' || selectedTool === 'triangle') {
+          pendingShape = newShape;
+          modalValues = {};
+          showModal(selectedTool);
+        } else {
+          shapes.push(newShape);
+          updateAll();
+        }
+      }
+    });
+
+    canvas.addEventListener('mousemove', e => {
+      const pos = getMousePos(e);
+      mousePos = pos;
+
+      if (selectedTool === 'line' || drawingLine) {
+        hoveredVertex = findNearestVertex(pos.x, pos.y, drawingLine?.startShapeId);
+      } else {
+        hoveredVertex = null;
+      }
+
+      if (dragging) {
+        const shape = shapes.find(s => s.id === dragging.shapeId);
+        if (shape) {
+          shape.x = pos.x - dragging.offsetX;
+          shape.y = pos.y - dragging.offsetY;
+          updateAll();
+        }
+      }
+
+      draw();
+    });
+
+    canvas.addEventListener('mouseup', e => {
+      const pos = getMousePos(e);
+
+      if (drawingLine) {
+        const vertex = findNearestVertex(pos.x, pos.y, drawingLine.startShapeId);
+        if (vertex) {
+          lines.push({
+            id: Date.now(),
+            startShapeId: drawingLine.startShapeId,
+            startVertexId: drawingLine.startVertexId,
+            endShapeId: vertex.shapeId,
+            endVertexId: vertex.vertexId,
+          });
+          updateAll();
+        }
+        drawingLine = null;
+      }
+
+      dragging = null;
+      draw();
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+      dragging = null;
+      drawingLine = null;
+      draw();
+    });
+
+    // Keyboard events
+    document.addEventListener('keydown', e => {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedShape && selectedTool === 'select') {
+        if (modal.classList.contains('hidden') && document.activeElement !== jsonEditor) {
+          e.preventDefault();
+          deleteShape(selectedShape);
+        }
+      }
+      if (e.key === 'Escape') {
+        if (!modal.classList.contains('hidden')) {
+          hideModal();
+        } else {
+          selectedShape = null;
+          draw();
+        }
+      }
+    });
+
+    function deleteShape(shapeId) {
+      shapes = shapes.filter(s => s.id !== shapeId);
+      lines = lines.filter(l => l.startShapeId !== shapeId && l.endShapeId !== shapeId);
+      selectedShape = null;
+      updateAll();
+    }
+
+    // Modal
+    function showModal(type) {
+      const fields = modalFieldsConfig[type] || [];
+      modalTitle.textContent = `Create ${shapeLabels[type]}`;
+      modalFields.innerHTML = '';
+      
+      fields.forEach((field, index) => {
+        const div = document.createElement('div');
+        div.className = 'mb-4';
+        div.innerHTML = `
+          <label class="block text-gray-300 text-sm font-medium mb-2">${field.label}</label>
+          <input type="number" data-key="${field.key}" class="w-full px-3 py-2 bg-gray-900 border border-gray-600 rounded-lg text-white focus:outline-none focus:border-blue-500" placeholder="Enter ${field.key}" ${index === 0 ? 'autofocus' : ''}>
+        `;
+        modalFields.appendChild(div);
+      });
+
+      modal.classList.remove('hidden');
+      const firstInput = modalFields.querySelector('input');
+      if (firstInput) firstInput.focus();
+    }
+
+    function hideModal() {
+      modal.classList.add('hidden');
+      pendingShape = null;
+      modalValues = {};
+    }
+
+    modalCancel.addEventListener('click', hideModal);
+
+    modalCreate.addEventListener('click', () => {
+      if (pendingShape) {
+        modalFields.querySelectorAll('input').forEach(input => {
+          const key = input.dataset.key;
+          const value = parseFloat(input.value);
+          if (!isNaN(value)) {
+            pendingShape[key] = value;
+          }
+        });
+        shapes.push(pendingShape);
+        updateAll();
+      }
+      hideModal();
+    });
+
+    modalFields.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        modalCreate.click();
+      }
+    });
+
+    // Drawing
+    function draw() {
+      ctx.fillStyle = '#1a1a2e';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Grid
+      ctx.strokeStyle = '#2a2a4e';
+      ctx.lineWidth = 1;
+      for (let x = 0; x < canvas.width; x += 20) {
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, canvas.height);
+        ctx.stroke();
+      }
+      for (let y = 0; y < canvas.height; y += 20) {
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(canvas.width, y);
+        ctx.stroke();
+      }
+
+      // Lines
+      lines.forEach(line => {
+        const endpoints = getLineEndpoints(line);
+        if (endpoints) {
+          ctx.beginPath();
+          ctx.strokeStyle = '#00d4ff';
+          ctx.lineWidth = 3;
+          ctx.moveTo(endpoints.start.x, endpoints.start.y);
+          ctx.lineTo(endpoints.end.x, endpoints.end.y);
+          ctx.stroke();
+
+          [endpoints.start, endpoints.end].forEach(point => {
+            ctx.beginPath();
+            ctx.fillStyle = '#00d4ff';
+            ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
+            ctx.fill();
+          });
+        }
+      });
+
+      // Drawing line preview
+      if (drawingLine) {
+        ctx.beginPath();
+        ctx.strokeStyle = 'rgba(0, 212, 255, 0.5)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        ctx.moveTo(drawingLine.startX, drawingLine.startY);
+        if (hoveredVertex) {
+          ctx.lineTo(hoveredVertex.x, hoveredVertex.y);
+        } else {
+          ctx.lineTo(mousePos.x, mousePos.y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+
+      // Shapes
+      shapes.forEach(shape => {
+        const halfSize = SHAPE_SIZE / 2;
+        const isSelected = selectedShape === shape.id && selectedTool === 'select';
+        
+        ctx.fillStyle = isSelected ? '#5a5aaa' : '#4a4a8a';
+        ctx.strokeStyle = isSelected ? '#ffcc00' : '#8888cc';
+        ctx.lineWidth = isSelected ? 3 : 2;
+
+        if (shape.type === 'circle') {
+          ctx.beginPath();
+          ctx.arc(shape.x, shape.y, halfSize, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        } else if (shape.type === 'square') {
+          ctx.beginPath();
+          ctx.rect(shape.x - halfSize, shape.y - halfSize, SHAPE_SIZE, SHAPE_SIZE);
+          ctx.fill();
+          ctx.stroke();
+        } else if (shape.type === 'triangle') {
+          ctx.beginPath();
+          ctx.moveTo(shape.x, shape.y - halfSize);
+          ctx.lineTo(shape.x + halfSize, shape.y + halfSize);
+          ctx.lineTo(shape.x - halfSize, shape.y + halfSize);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        }
+
+        // Delete button for selected
+        if (isSelected) {
+          ctx.fillStyle = '#ff4444';
+          ctx.beginPath();
+          ctx.arc(shape.x + halfSize - 5, shape.y - halfSize + 5, 8, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#fff';
+          ctx.font = 'bold 12px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('×', shape.x + halfSize - 5, shape.y - halfSize + 5);
+        }
+
+        // Vertices for line tool
+        if (selectedTool === 'line' || drawingLine) {
+          getShapeVertices(shape).forEach(vertex => {
+            const isHovered = hoveredVertex?.shapeId === shape.id && hoveredVertex?.vertexId === vertex.id;
+            ctx.beginPath();
+            ctx.fillStyle = isHovered ? '#00ff88' : '#ff6b6b';
+            ctx.arc(vertex.x, vertex.y, isHovered ? 8 : 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#fff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+          });
+        }
+      });
+
+      // Shape preview
+      if (['circle', 'square', 'triangle'].includes(selectedTool)) {
+        const halfSize = SHAPE_SIZE / 2;
+        ctx.fillStyle = 'rgba(74, 74, 138, 0.5)';
+        ctx.strokeStyle = 'rgba(136, 136, 204, 0.7)';
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+
+        if (selectedTool === 'circle') {
+          ctx.beginPath();
+          ctx.arc(mousePos.x, mousePos.y, halfSize, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        } else if (selectedTool === 'square') {
+          ctx.beginPath();
+          ctx.rect(mousePos.x - halfSize, mousePos.y - halfSize, SHAPE_SIZE, SHAPE_SIZE);
+          ctx.fill();
+          ctx.stroke();
+        } else if (selectedTool === 'triangle') {
+          ctx.beginPath();
+          ctx.moveTo(mousePos.x, mousePos.y - halfSize);
+          ctx.lineTo(mousePos.x + halfSize, mousePos.y + halfSize);
+          ctx.lineTo(mousePos.x - halfSize, mousePos.y + halfSize);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+        }
+        ctx.setLineDash([]);
+      }
+    }
+
+    // JSON sync
+    function getCanvasState() {
+      return {
+        shapes: shapes.map(shape => {
+          const base = {
+            id: shape.id,
+            type: shape.type,
+            componentType: shapeLabels[shape.type],
+            position: { x: Math.round(shape.x), y: Math.round(shape.y) },
+            size: SHAPE_SIZE,
+            vertices: getShapeVertices(shape).map(v => ({
+              id: v.id,
+              x: Math.round(v.x),
+              y: Math.round(v.y)
+            }))
+          };
+          if (shape.type === 'circle' && shape.p_set !== undefined) base.p_set = shape.p_set;
+          if (shape.type === 'triangle') {
+            if (shape.p_nom !== undefined) base.p_nom = shape.p_nom;
+            if (shape.marginal_cost !== undefined) base.marginal_cost = shape.marginal_cost;
+          }
+          return base;
+        }),
+        connections: lines.map(line => {
+          const endpoints = getLineEndpoints(line);
+          return {
+            id: line.id,
+            from: {
+              shapeId: line.startShapeId,
+              vertexId: line.startVertexId,
+              position: endpoints ? { x: Math.round(endpoints.start.x), y: Math.round(endpoints.start.y) } : null
+            },
+            to: {
+              shapeId: line.endShapeId,
+              vertexId: line.endVertexId,
+              position: endpoints ? { x: Math.round(endpoints.end.x), y: Math.round(endpoints.end.y) } : null
+            }
+          };
+        })
+      };
+    }
+
+    function updateJsonEditor() {
+      if (!isEditingJson) {
+        jsonEditor.value = JSON.stringify(getCanvasState(), null, 2);
+      }
+    }
+
+    let jsonDebounce = null;
+    jsonEditor.addEventListener('input', () => {
+      isEditingJson = true;
+      jsonStatus.innerHTML = '<span class="text-xs text-yellow-400">Editing...</span>';
+      
+      clearTimeout(jsonDebounce);
+      jsonDebounce = setTimeout(() => {
+        try {
+          const parsed = JSON.parse(jsonEditor.value);
+          if (parsed.shapes) {
+            shapes = parsed.shapes.map(s => {
+              const shape = { id: s.id, type: s.type, x: s.position?.x ?? 0, y: s.position?.y ?? 0 };
+              if (s.p_set !== undefined) shape.p_set = s.p_set;
+              if (s.p_nom !== undefined) shape.p_nom = s.p_nom;
+              if (s.marginal_cost !== undefined) shape.marginal_cost = s.marginal_cost;
+              return shape;
+            });
+          }
+          if (parsed.connections) {
+            lines = parsed.connections.map(c => ({
+              id: c.id,
+              startShapeId: c.from?.shapeId,
+              startVertexId: c.from?.vertexId,
+              endShapeId: c.to?.shapeId,
+              endVertexId: c.to?.vertexId
+            }));
+          }
+          jsonStatus.innerHTML = '<span class="text-xs text-green-400">✓ Synced</span>';
+          updateCounts();
+          updatePythonCode();
+          draw();
+        } catch (e) {
+          jsonStatus.innerHTML = '<span class="text-xs text-red-400">⚠ Invalid JSON</span>';
+        }
+        setTimeout(() => { isEditingJson = false; }, 500);
+      }, 300);
+    });
+
+    jsonEditor.addEventListener('focus', () => { isEditingJson = true; });
+    jsonEditor.addEventListener('blur', () => { setTimeout(() => { isEditingJson = false; }, 600); });
+
+    // Python code generation
+    function generatePythonCode() {
+      const codeLines = [
+        'import pypsa',
+        '',
+        '# Create a new network',
+        'n = pypsa.Network()',
+        '',
+        '# Add components'
+      ];
+
+      const findConnectedBus = (shapeId) => {
+        for (const line of lines) {
+          let connectedId = null;
+          if (line.startShapeId === shapeId) connectedId = line.endShapeId;
+          else if (line.endShapeId === shapeId) connectedId = line.startShapeId;
+          
+          if (connectedId) {
+            const connectedShape = shapes.find(s => s.id === connectedId);
+            if (connectedShape && connectedShape.type === 'circle') {
+              return `bus-${connectedShape.id}`;
+            }
+          }
+        }
+        return null;
+      };
+
+      // Buses
+      shapes.filter(s => s.type === 'circle').forEach(shape => {
+        const args = ['"Bus"', `"bus-${shape.id}"`];
+        if (shape.p_set !== undefined) args.push(`p_set=${shape.p_set}`);
+        codeLines.push(`n.add(${args.join(', ')})`);
+      });
+
+      // Loads
+      shapes.filter(s => s.type === 'square').forEach(shape => {
+        const busName = findConnectedBus(shape.id);
+        const args = ['"Load"', `"load-${shape.id}"`];
+        if (busName) args.push(`bus="${busName}"`);
+        if (shape.p_set !== undefined) args.push(`p_set=${shape.p_set}`);
+        codeLines.push(`n.add(${args.join(', ')})`);
+      });
+
+      // Generators
+      shapes.filter(s => s.type === 'triangle').forEach(shape => {
+        const busName = findConnectedBus(shape.id);
+        const args = ['"Generator"', `"generator-${shape.id}"`];
+        if (busName) args.push(`bus="${busName}"`);
+        if (shape.p_nom !== undefined) args.push(`p_nom=${shape.p_nom}`);
+        if (shape.marginal_cost !== undefined) args.push(`marginal_cost=${shape.marginal_cost}`);
+        codeLines.push(`n.add(${args.join(', ')})`);
+      });
+
+      codeLines.push('');
+      codeLines.push('# Optimize the network using HiGHS-JS solver');
+      codeLines.push('print("Optimizing network with HiGHS WebAssembly solver...")');
+      codeLines.push('status, condition = n.optimize(solver_name="highs-js")');
+      codeLines.push('print(f"Optimization complete! Status: {status}, Condition: {condition}")');
+      codeLines.push('');
+      codeLines.push('# Get statistics');
+      codeLines.push('print("\\nNetwork Statistics:")');
+      codeLines.push('print(n.statistics().to_string())');
+
+      return codeLines.join('\n');
+    }
+
+    function updatePythonCode() {
+      codeDisplay.textContent = generatePythonCode();
+    }
+
+    // Counts
+    function updateCounts() {
+      shapeCount.textContent = shapes.length;
+      lineCount.textContent = lines.length;
+    }
+
+    // Update all
+    function updateAll() {
+      updateCounts();
+      updateJsonEditor();
+      updatePythonCode();
+      draw();
+    }
+
+    // JSON toggle
+    jsonToggle.addEventListener('click', () => {
+      showJson = !showJson;
+      jsonPanel.classList.toggle('hidden', !showJson);
+      leftPanel.classList.toggle('w-2/3', showJson);
+      leftPanel.classList.toggle('w-full', !showJson);
+      resizeCanvas();
+    });
+
+    // Clear
+    clearBtn.addEventListener('click', () => {
+      shapes = [];
+      lines = [];
+      selectedShape = null;
+      updateAll();
+    });
+
+    // Copy
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(generatePythonCode());
+    });
+
+    // Clear output
+    clearOutputBtn.addEventListener('click', () => {
+      outputDisplay.textContent = '';
+    });
+
+    // Pyodide initialization
+    async function initPyodide() {
+      outputDisplay.textContent = 'Initializing Pyodide...\n';
+
+      try {
+        pyodide = await loadPyodide();
+        outputDisplay.textContent += 'Pyodide loaded!\n';
+
+        pyodide.setStdout({
+          batched: (msg) => {
+            outputDisplay.textContent += msg + '\n';
+            outputDisplay.scrollTop = outputDisplay.scrollHeight;
+          }
+        });
+
+        // HiGHS bridge
+        outputDisplay.textContent += 'Loading HiGHS solver...\n';
+        
+        window.js_highs_solve = async (problem) => {
+          if (!highsSolver) {
+            let attempts = 0;
+            while (typeof Module === 'undefined' && attempts < 50) {
+              await new Promise(r => setTimeout(r, 100));
+              attempts++;
+            }
+            highsSolver = await Module({
+              locateFile: (file) => 'https://lovasoa.github.io/highs-js/' + file
+            });
+          }
+          return highsSolver.solve(problem);
+        };
+
+        outputDisplay.textContent += 'Loading micropip...\n';
+        await pyodide.loadPackage('micropip');
+        const micropip = pyodide.pyimport('micropip');
+
+        outputDisplay.textContent += 'Installing PyPSA...\n';
+        await micropip.install('https://fhk.github.io/linopy/wheels/linopy-0.0.post1.dev1237+g837fc4da9-py3-none-any.whl');
+        await micropip.install('https://fhk.github.io/PyPSA-lite/wheels/pypsa-1.0.7.dev1+g0e491881-py3-none-any.whl');
+
+        outputDisplay.textContent += 'PyPSA ready!\n\n';
+        
+        pyodideReady = true;
+        pyodideStatus.textContent = '✓ Ready';
+        pyodideStatus.className = 'text-xs text-green-400';
+        runBtn.disabled = false;
+        runBtn.className = 'px-3 py-1 text-xs rounded bg-green-600 text-white hover:bg-green-500';
+      } catch (err) {
+        outputDisplay.textContent += 'Error: ' + err.message + '\n';
+        pyodideStatus.textContent = '✗ Failed';
+        pyodideStatus.className = 'text-xs text-red-400';
+      }
+    }
+
+    // Run Python
+    runBtn.addEventListener('click', async () => {
+      if (!pyodideReady || isRunning || shapes.length === 0) return;
+
+      isRunning = true;
+      runBtn.textContent = '⏳ Running...';
+      runBtn.disabled = true;
+
+      outputDisplay.textContent += '\n' + '='.repeat(50) + '\nRunning...\n' + '='.repeat(50) + '\n\n';
+
+      try {
+        await pyodide.runPythonAsync(generatePythonCode());
+        outputDisplay.textContent += '\n' + '='.repeat(50) + '\nComplete!\n';
+      } catch (err) {
+        outputDisplay.textContent += 'Error: ' + err.message + '\n';
+      } finally {
+        isRunning = false;
+        runBtn.textContent = '▶ Run';
+        runBtn.disabled = shapes.length === 0;
+      }
+    });
+
+    // Initialize
+    resizeCanvas();
+    updateAll();
+    updateToolHint();
+    initPyodide();
+  </script>
+</body>
+</html>

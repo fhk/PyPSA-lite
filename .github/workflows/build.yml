@@ -81,12 +81,16 @@ jobs:
         cp dist/*.whl gh-pages/wheels/
         cp index.html gh-pages/index.html
         cp run.html gh-pages/run.html
+        cp app.html gh-pages/app.html
 
         # Update index.html with correct wheel filename
         sed -i 's|pypsa-1.0.7.dev1+g0e491881-py3-none-any.whl|${{ steps.wheel.outputs.filename }}|g' gh-pages/index.html
 
         # Update run.html with correct wheel filename
         sed -i 's|pypsa-1.0.7.dev1+g0e491881-py3-none-any.whl|${{ steps.wheel.outputs.filename }}|g' gh-pages/run.html
+
+        # Update app.html with correct wheel filename
+        sed -i 's|pypsa-1.0.7.dev1+g0e491881-py3-none-any.whl|${{ steps.wheel.outputs.filename }}|g' gh-pages/app.html
 
         # Create a simple index page for the wheels directory
         cat > gh-pages/wheels/index.html << 'EOF'
