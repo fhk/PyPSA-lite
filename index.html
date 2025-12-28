@@ -12,12 +12,32 @@
       You can execute any Python code. Just enter something in the box below and
       click the button.
     </p>
-    <input id="code" value="sum([1, 2, 3, 4, 5])" style="width: 100%" />
+    <div>Code:</div>
+    <textarea id="code" style="width: 100%; font-family: monospace" rows="10">
+import pypsa
+
+# Create a simple network
+n = pypsa.Network()
+n.add("Bus", "bus1")
+n.add("Load", "load1", bus="bus1", p_set=100)
+n.add("Generator", "gen1", bus="bus1", p_nom=150, marginal_cost=20)
+
+# Optimize
+status, condition = n.optimize(solver_name="highs-js")
+print(f"Status: {status}, Condition: {condition}")
+print(n.statistics().to_string())</textarea
+    >
+    <br />
     <button onclick="evaluatePython()">Run</button>
     <br />
     <br />
     <div>Output:</div>
-    <textarea id="output" style="width: 100%" rows="20" disabled></textarea>
+    <textarea
+      id="output"
+      style="width: 100%; font-family: monospace"
+      rows="20"
+      disabled
+    ></textarea>
 
     <script>
       const output = document.getElementById("output");
@@ -40,8 +60,14 @@
       async function solveWithHiGHS(problem) {
         console.log("[HiGHS-JS Bridge] solveWithHiGHS called");
         console.log("[HiGHS-JS Bridge] Problem type:", typeof problem);
-        console.log("[HiGHS-JS Bridge] Problem length:", problem?.length || "N/A");
-        console.log("[HiGHS-JS Bridge] Problem preview:", problem?.substring(0, 200) || problem);
+        console.log(
+          "[HiGHS-JS Bridge] Problem length:",
+          problem?.length || "N/A"
+        );
+        console.log(
+          "[HiGHS-JS Bridge] Problem preview:",
+          problem?.substring(0, 200) || problem
+        );
 
         globalThis.highs_solve_pending = true;
         globalThis.highs_last_result = null;
@@ -53,12 +79,15 @@
           // Wait for HiGHS script to load if not ready yet
           let attempts = 0;
           const maxAttempts = 50; // 5 seconds max
-          while (typeof Module === 'undefined') {
-            console.log("[HiGHS-JS Bridge] Waiting for HiGHS script (Module)... attempt", attempts + 1);
+          while (typeof Module === "undefined") {
+            console.log(
+              "[HiGHS-JS Bridge] Waiting for HiGHS script (Module)... attempt",
+              attempts + 1
+            );
             if (attempts >= maxAttempts) {
               throw new Error("HiGHS Module failed to load after 5 seconds");
             }
-            await new Promise(resolve => setTimeout(resolve, 100));
+            await new Promise((resolve) => setTimeout(resolve, 100));
             attempts++;
           }
 
@@ -75,11 +104,19 @@
               },
             });
             console.log("[HiGHS-JS Bridge] Solver initialized successfully");
-            console.log("[HiGHS-JS Bridge] Solver methods:", Object.keys(highsSolver));
+            console.log(
+              "[HiGHS-JS Bridge] Solver methods:",
+              Object.keys(highsSolver)
+            );
           } catch (error) {
-            console.error("[HiGHS-JS Bridge] Solver initialization failed:", error);
+            console.error(
+              "[HiGHS-JS Bridge] Solver initialization failed:",
+              error
+            );
             globalThis.highs_solve_pending = false;
-            throw new Error("Failed to initialize HiGHS solver: " + error.message);
+            throw new Error(
+              "Failed to initialize HiGHS solver: " + error.message
+            );
           }
         }
 
@@ -132,62 +169,6 @@
 
           output.value += "PyPSA installed successfully!\n";
           output.value += "HiGHS-JS solver bridge is ready!\n";
-
-          // Test HiGHS solver with a simple problem first
-          output.value += "Testing HiGHS solver...\n";
-          try {
-            const testProblem = `Maximize
- obj: x + 2 y
-Subject To
- c1: x + y <= 20
- c2: x - y >= -30
-Bounds
- 0 <= x
- 0 <= y
-End`;
-            console.log("[HiGHS Test] Running test problem...");
-            const testResult = await globalThis.js_highs_solve(testProblem);
-            console.log("[HiGHS Test] Test result:", testResult);
-            output.value += "HiGHS solver test passed!\n";
-          } catch (err) {
-            output.value += "HiGHS solver test failed: " + err + "\n";
-            console.error("[HiGHS Test] Failed:", err);
-            throw err;
-          }
-
-          output.value += "\nRunning PyPSA demo...\n\n";
-
-          // Run the demo
-          await pyodide.runPythonAsync(`
-import pypsa
-
-# Create a new network
-n = pypsa.Network()
-
-# Add components
-n.add("Bus", "mybus")
-n.add("Load", "myload", bus="mybus", p_set=100)
-n.add("Generator", "mygen", bus="mybus", p_nom=100, marginal_cost=20)
-
-# Optimize the network using HiGHS-JS solver
-print("Optimizing network with HiGHS WebAssembly solver...")
-try:
-    status, condition = n.optimize(solver_name="highs-js")
-    print(f"Optimization complete! Status: {status}, Condition: {condition}")
-    if status == "ok":
-        print("Optimization successful!")
-except Exception as e:
-    print(f"Optimization error: {e}")
-    import traceback
-    traceback.print_exc()
-
-# Get statistics
-print("\\nNetwork Statistics:")
-print(n.statistics().to_string())
-          `);
-
-          output.value += "\nReady! You can now run Python code.\n";
-          return pyodide;
         } catch (err) {
           output.value += "Error: " + err + "\n";
           console.error(err);
