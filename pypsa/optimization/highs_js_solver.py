@@ -86,13 +86,16 @@ def solve_with_highs_js(model: Model, **kwargs) -> tuple[str, str]:
         if result is None:
             raise Exception("HiGHS solver returned no result")
 
+        print(f"[DEBUG] HiGHS-JS result received, type: {type(result)}")
         logger.info(f"HiGHS-JS result received")
 
         # Convert JsProxy to Python dict using to_py()
         if hasattr(result, 'to_py'):
             result = result.to_py()
+            print(f"[DEBUG] Converted result to Python dict. Keys: {list(result.keys()) if isinstance(result, dict) else 'N/A'}")
             logger.info(f"Converted result to Python dict")
         else:
+            print(f"[DEBUG] ERROR: Result doesn't have to_py() method")
             logger.error("Result doesn't have to_py() method")
             return "error", "unknown"
 
@@ -131,7 +134,12 @@ def _parse_highs_result(result, model: Model):
     status, condition = status_map.get(result_status, ("error", "unknown"))
 
     if status != "ok":
+        print(f"[DEBUG] HiGHS-JS solver finished with status: {result_status}")
+        print(f"[DEBUG] Available keys in result: {list(result.keys())}")
+        print(f"[DEBUG] Full result: {result}")
         logger.warning(f"HiGHS-JS solver finished with status: {result_status}")
+        logger.warning(f"Available status values in result: {list(result.keys())}")
+        logger.warning(f"Full result: {result}")
         return status, condition
 
     # Extract solution values from Columns dict
