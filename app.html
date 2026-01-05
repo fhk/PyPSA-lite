@@ -488,7 +488,7 @@
             y: mousePos.y,
           };
 
-          if (selectedTool === "circle" || selectedTool === "triangle") {
+          if (selectedTool === "square" || selectedTool === "triangle") {
             pendingShape = newShape;
             modalValues = {};
             showModal(selectedTool);
@@ -827,7 +827,7 @@
                 y: Math.round(v.y),
               })),
             };
-            if (shape.type === "circle" && shape.p_set !== undefined)
+            if (shape.type === "square" && shape.p_set !== undefined)
               base.p_set = shape.p_set;
             if (shape.type === "triangle") {
               if (shape.p_nom !== undefined) base.p_nom = shape.p_nom;
