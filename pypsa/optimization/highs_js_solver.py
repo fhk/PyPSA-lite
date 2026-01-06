@@ -63,28 +63,45 @@ def solve_with_highs_js(model: Model, **kwargs) -> tuple[str, str]:
 
     # Call JavaScript HiGHS solver (async function)
     try:
+        import time
+
+        # Reset the global state before calling
+        js.globalThis.highs_solve_pending = False
+        js.globalThis.highs_last_result = None
+
         # Call the async function - it will store result in globalThis.highs_last_result
+        logger.info("Calling HiGHS-JS solver...")
         js.js_highs_solve(lp_string)
 
         # Poll until solve is complete
-        import time
         timeout = 30  # seconds
         start_time = time.time()
 
         logger.info("Waiting for HiGHS solver to complete...")
 
-        while js.highs_solve_pending and (time.time() - start_time) < timeout:
-            # Let the browser event loop run
-            time.sleep(0.1)
+        # Wait for either: pending to become true (solver started), or result to be available
+        while (time.time() - start_time) < timeout:
+            time.sleep(0.05)  # Let the browser event loop run
 
-        if js.highs_solve_pending:
-            raise Exception("Timeout waiting for HiGHS solver")
+            # If we have a result, we're done
+            if js.highs_last_result is not None:
+                break
+
+            # If solver is running (pending=True), continue waiting
+            if js.highs_solve_pending:
+                continue
+
+            # If pending is False and no result yet, keep waiting (solver might not have started yet)
+
+        # Check if we timed out
+        if js.highs_last_result is None:
+            if js.highs_solve_pending:
+                raise Exception("Timeout waiting for HiGHS solver (still running)")
+            else:
+                raise Exception("Timeout waiting for HiGHS solver (never started or no result)")
 
         # Get the result from the global variable
         result = js.highs_last_result
-
-        if result is None:
-            raise Exception("HiGHS solver returned no result")
 
         print(f"[DEBUG] HiGHS-JS result received, type: {type(result)}")
         logger.info(f"HiGHS-JS result received")
