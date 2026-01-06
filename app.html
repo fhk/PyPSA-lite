@@ -1164,6 +1164,28 @@
           globalThis.js_highs_solve = solveWithHiGHS;
           console.log("[HiGHS-JS Bridge] Exposed js_highs_solve to Python");
 
+          // Test HiGHS solver with a simple problem first
+          outputDisplay.textContent += "Testing HiGHS solver...\n";
+          try {
+            const testProblem = `Maximize
+ obj: x + 2 y
+Subject To
+ c1: x + y <= 20
+ c2: x - y >= -30
+Bounds
+ 0 <= x
+ 0 <= y
+End`;
+            console.log("[HiGHS Test] Running test problem...");
+            const testResult = await globalThis.js_highs_solve(testProblem);
+            console.log("[HiGHS Test] Test result:", testResult);
+            outputDisplay.textContent += "HiGHS solver test passed!\n";
+          } catch (err) {
+            outputDisplay.textContent += "HiGHS solver test failed: " + err + "\n";
+            console.error("[HiGHS Test] Failed:", err);
+            throw err;
+          }
+
           outputDisplay.textContent += "Loading micropip...\n";
           await pyodide.loadPackage("micropip");
           const micropip = pyodide.pyimport("micropip");
