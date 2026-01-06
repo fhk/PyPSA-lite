@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>PyPSA in Browser</title>
+    <script src="https://cdn.jsdelivr.net/pyodide/v0.27.7/full/pyodide.js"></script>
+    <script src="https://lovasoa.github.io/highs-js/highs.js"></script>
+  </head>
+
+  <body>
+    <h1>PyPSA Demo</h1>
+    <p>
+      You can execute any Python code. Edit the code below and click the button to run it.
+    </p>
+    <div>Code:</div>
+    <textarea id="code" style="width: 100%; font-family: monospace" rows="15">import pypsa
+
+# Create a new network
+n = pypsa.Network()
+
+# Add components
+n.add("Bus", "mybus")
+n.add("Load", "myload", bus="mybus", p_set=100)
+n.add("Generator", "mygen", bus="mybus", p_nom=100, marginal_cost=20)
+
+# Optimize the network using HiGHS-JS solver
+print("Optimizing network with HiGHS WebAssembly solver...")
+status, condition = n.optimize(solver_name="highs-js")
+print(f"Optimization complete! Status: {status}, Condition: {condition}")
+
+# Get statistics
+print("\\nNetwork Statistics:")
+print(n.statistics().to_string())</textarea>
+    <br />
+    <button onclick="evaluatePython()">Run</button>
+    <br />
+    <br />
+    <div>Output:</div>
+    <textarea id="output" style="width: 100%; font-family: monospace" rows="20" disabled></textarea>
+
+    <script>
+      const output = document.getElementById("output");
+      const code = document.getElementById("code");
+
+      output.value = "Initializing Pyodide...\n";
+
+      // Initialize HiGHS solver
+      let highsSolver = null;
+
+      // Global variable to store the last result
+      globalThis.highs_last_result = null;
+      globalThis.highs_solve_pending = false;
+
+      // Bridge function: solve LP/MIP problem using HiGHS
+      async function solveWithHiGHS(problem) {
+        console.log("[HiGHS-JS Bridge] solveWithHiGHS called");
+        console.log("[HiGHS-JS Bridge] Problem type:", typeof problem);
+        console.log(
+          "[HiGHS-JS Bridge] Problem length:",
+          problem?.length || "N/A"
+        );
+        console.log(
+          "[HiGHS-JS Bridge] Problem preview:",
+          problem?.substring(0, 200) || problem
+        );
+
+        globalThis.highs_solve_pending = true;
+        globalThis.highs_last_result = null;
+
+        // Initialize solver on first use
+        if (!highsSolver) {
+          console.log("[HiGHS-JS Bridge] Initializing HiGHS solver...");
+
+          // Wait for HiGHS script to load if not ready yet
+          let attempts = 0;
+          const maxAttempts = 50; // 5 seconds max
+          while (typeof Module === "undefined") {
+            console.log(
+              "[HiGHS-JS Bridge] Waiting for HiGHS script (Module)... attempt",
+              attempts + 1
+            );
+            if (attempts >= maxAttempts) {
+              throw new Error("HiGHS Module failed to load after 5 seconds");
+            }
+            await new Promise((resolve) => setTimeout(resolve, 100));
+            attempts++;
+          }
+
+          try {
+            console.log("[HiGHS-JS Bridge] Module type:", typeof Module);
+            console.log("[HiGHS-JS Bridge] Module:", Module);
+
+            // Call Module() with locateFile configuration
+            highsSolver = await Module({
+              locateFile: (file) => {
+                const url = "https://lovasoa.github.io/highs-js/" + file;
+                console.log("[HiGHS-JS Bridge] Loading WASM file:", url);
+                return url;
+              },
+            });
+            console.log("[HiGHS-JS Bridge] Solver initialized successfully");
+            console.log(
+              "[HiGHS-JS Bridge] Solver methods:",
+              Object.keys(highsSolver)
+            );
+          } catch (error) {
+            console.error(
+              "[HiGHS-JS Bridge] Solver initialization failed:",
+              error
+            );
+            globalThis.highs_solve_pending = false;
+            throw new Error(
+              "Failed to initialize HiGHS solver: " + error.message
+            );
+          }
+        }
+
+        // Solve the problem
+        console.log("[HiGHS-JS Bridge] Calling solver.solve()...");
+        try {
+          const result = highsSolver.solve(problem);
+          console.log("[HiGHS-JS Bridge] Solver completed");
+          console.log("[HiGHS-JS Bridge] Result type:", typeof result);
+          console.log("[HiGHS-JS Bridge] Result:", result);
+
+          // Store result in global variable for Python to access
+          globalThis.highs_last_result = result;
+          globalThis.highs_solve_pending = false;
+
+          return result;
+        } catch (error) {
+          console.error("[HiGHS-JS Bridge] Solve failed:", error);
+          globalThis.highs_solve_pending = false;
+          throw new Error("Solve failed: " + error.message);
+        }
+      }
+
+      // Initialize Pyodide and load PyPSA
+      async function main() {
+        try {
+          // Load Pyodide with increased memory for large packages like Polars
+          let pyodide = await loadPyodide({
+            indexURL: "https://cdn.jsdelivr.net/pyodide/v0.27.7/full/"
+          });
+          output.value += "Pyodide loaded!\n";
+
+          // Configure Python stdout to write to output textarea
+          pyodide.setStdout({ batched: (msg) => { output.value += msg + "\n"; } });
+
+          // Initialize HiGHS solver
+          output.value += "Loading HiGHS solver...\n";
+
+          // Make the solver available to Python via the js module
+          // Set on JavaScript global object so it's accessible via js.js_highs_solve in Python
+          globalThis.js_highs_solve = solveWithHiGHS;
+          console.log("[HiGHS-JS Bridge] Exposed js_highs_solve to Python");
+
+          output.value += "Loading micropip...\n";
+          await pyodide.loadPackage("micropip");
+          const micropip = pyodide.pyimport("micropip");
+
+          // Try to install polars from Pyodide's package index first (if available)
+          output.value += "Loading required packages...\n";
+          try {
+            await pyodide.loadPackage(["numpy", "pandas", "scipy"]);
+          } catch (err) {
+            output.value += "Note: Some packages loaded via micropip instead\n";
+          }
+
+          output.value += "Installing PyPSA from GitHub Pages...\n";
+          // This URL will be automatically updated by the workflow
+          await micropip.install(
+            "https://fhk.github.io/linopy/wheels/linopy-0.0.post1.dev1237+g837fc4da9-py3-none-any.whl"
+          );
+          await micropip.install(
+            "https://fhk.github.io/PyPSA-lite/wheels/pypsa-0.0.post1.dev3230+gfe988126b-py3-none-any.whl"
+          );
+
+          output.value += "PyPSA installed successfully!\n";
+          output.value += "HiGHS-JS solver bridge is ready!\n";
+
+          // Test HiGHS solver with a simple problem first
+          output.value += "Testing HiGHS solver...\n";
+          try {
+            const testProblem = `Maximize
+ obj: x + 2 y
+Subject To
+ c1: x + y <= 20
+ c2: x - y >= -30
+Bounds
+ 0 <= x
+ 0 <= y
+End`;
+            console.log("[HiGHS Test] Running test problem...");
+            const testResult = await globalThis.js_highs_solve(testProblem);
+            console.log("[HiGHS Test] Test result:", testResult);
+            output.value += "HiGHS solver test passed!\n";
+          } catch (err) {
+            output.value += "HiGHS solver test failed: " + err + "\n";
+            console.error("[HiGHS Test] Failed:", err);
+            throw err;
+          }
+
+          output.value += "\nRunning PyPSA demo...\n\n";
+
+          // Run the demo
+          await pyodide.runPythonAsync(`
+import pypsa
+
+# Create a new network
+n = pypsa.Network()
+
+# Add components
+n.add("Bus", "mybus")
+n.add("Load", "myload", bus="mybus", p_set=100)
+n.add("Generator", "mygen", bus="mybus", p_nom=100, marginal_cost=20)
+
+# Optimize the network using HiGHS-JS solver
+print("Optimizing network with HiGHS WebAssembly solver...")
+try:
+    status, condition = n.optimize(solver_name="highs-js")
+    print(f"Optimization complete! Status: {status}, Condition: {condition}")
+    if status == "ok":
+        print("Optimization successful!")
+except Exception as e:
+    print(f"Optimization error: {e}")
+    import traceback
+    traceback.print_exc()
+
+# Get statistics
+print("\\nNetwork Statistics:")
+print(n.statistics().to_string())
+          `);
+
+          output.value += "\nReady! You can now run Python code.\n";
+          return pyodide;
+        } catch (err) {
+          output.value += "Error: " + err + "\n";
+          console.error(err);
+        }
+      }
+
+      let pyodideReadyPromise = main();
+
+      async function evaluatePython() {
+        let pyodide = await pyodideReadyPromise;
+        if (!pyodide) {
+          output.value += "\nError: Pyodide not initialized yet. Please wait...\n";
+          return;
+        }
+        try {
+          output.value += "\n" + "=".repeat(60) + "\n";
+          output.value += "Running code...\n";
+          output.value += "=".repeat(60) + "\n";
+          let result = await pyodide.runPythonAsync(code.value);
+          // Print statements go to stdout, only show final result if not None
+          if (result !== undefined && result !== null) {
+            output.value += "\nResult: " + result + "\n";
+          }
+          output.value += "=".repeat(60) + "\n";
+        } catch (err) {
+          output.value += "\nError: " + err + "\n";
+          output.value += "=".repeat(60) + "\n";
+        }
+      }
+    </script>
+  </body>
+</html>
